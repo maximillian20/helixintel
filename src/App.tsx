@@ -1,24 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Map as LeafletMap } from 'leaflet';
 import { CircleMarker, LayersControl, MapContainer, Popup, TileLayer, Tooltip } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import {
   alertFeed,
-  alertRules,
-  analystSummary,
   countryAssessmentDetails,
   countryAssessments,
-  dashboardMetrics,
   incidentDetails,
-  incidents,
   intelligenceFeed,
-  priorityIntelligence,
-  regionMarkers,
   sibDraft,
   threatIndicators,
-  trendData,
   watchlists,
 } from './data/demo.ts';
+import { findPlaces, type Place } from './data/geo.ts';
 
 const severityTone = {
   Critical: 'critical',
@@ -43,14 +37,6 @@ const navItems = [
   'Sources',
   'Settings',
 ] as const;
-
-const currentDate = new Date().toLocaleString('en-GB', {
-  day: '2-digit',
-  month: 'short',
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-});
 
 type FeedItem = Omit<
   (typeof intelligenceFeed)[number],
@@ -143,67 +129,185 @@ function formatIsoDate(iso: string) {
   });
 }
 
-function OverviewPanel() {
+function relativeTime(iso: string | null | undefined, now: number) {
+  if (!iso) return 'not yet';
+  const parsed = Date.parse(iso);
+  if (Number.isNaN(parsed)) return 'unknown';
+  const seconds = Math.max(0, Math.round((now - parsed) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} d ago`;
+}
+
+function usePublicFeed() {
+  const [payload, setPayload] = useState<PublicFeedPayload | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    try {
+      const response = await fetch('/api/feed/public');
+      const data = await response.json() as PublicFeedPayload;
+      if (!response.ok) throw new Error(data.error || `Public feeds returned HTTP ${response.status}`);
+      setPayload(data);
+      setError(data.error ?? '');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not load public feeds.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    const events = new EventSource('/api/events');
+    let timer: number | undefined;
+    const reloadSoon = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void load(), 250);
+    };
+    events.addEventListener('public-feed-updated', reloadSoon);
+    events.addEventListener('source-sync-updated', reloadSoon);
+    const interval = window.setInterval(() => void load(), 60_000);
+    return () => {
+      events.close();
+      window.clearInterval(interval);
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [load]);
+
+  return { payload, error, loading };
+}
+
+type PublicFeedState = ReturnType<typeof usePublicFeed>;
+
+type PlaceMention = { place: Place; items: PublicFeedPayload['items'] };
+
+function OverviewPanel({ feed }: { feed: PublicFeedState }) {
   const mapRef = useRef<LeafletMap>(null);
-  const [mapFilter, setMapFilter] = useState('All risk');
-  const riskColors = {
-    critical: '#ef4444',
-    warning: '#f59e0b',
-    neutral: '#94a3b8',
-  };
-  const visibleMarkers = regionMarkers.filter((marker) => (
-    mapFilter === 'All risk'
-    || (mapFilter === 'Critical' && marker.tone === 'critical')
-    || (mapFilter === 'Elevated' && marker.tone === 'warning')
-  ));
+  const [mapFilter, setMapFilter] = useState('All mentioned');
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const items = useMemo(() => feed.payload?.items ?? [], [feed.payload]);
+  const sources = useMemo(() => feed.payload?.sources ?? [], [feed.payload]);
+  const healthyCount = sources.filter((source) => source.status === 'healthy').length;
+  const pollMinutes = sources[0] ? Math.round(sources[0].pollIntervalMs / 60000) : null;
+  const dayMs = 24 * 60 * 60 * 1000;
+  const last24h = items.filter((item) => now - Date.parse(item.publishedAt) <= dayMs).length;
+
+  const perDay = useMemo(() => {
+    const days = Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(now - (6 - index) * dayMs);
+      return { key: date.toDateString(), label: date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }), count: 0 };
+    });
+    for (const item of items) {
+      const published = new Date(item.publishedAt);
+      if (Number.isNaN(published.getTime())) continue;
+      const bucket = days.find((day) => day.key === published.toDateString());
+      if (bucket) bucket.count += 1;
+    }
+    return days;
+  }, [items, now, dayMs]);
+  const maxPerDay = Math.max(1, ...perDay.map((day) => day.count));
+
+  const mentions = useMemo(() => {
+    const byPlace = new Map<Place, PlaceMention>();
+    for (const item of items) {
+      for (const place of findPlaces(`${item.headline}. ${item.summary}`)) {
+        const entry = byPlace.get(place) ?? { place, items: [] };
+        entry.items.push(item);
+        byPlace.set(place, entry);
+      }
+    }
+    return [...byPlace.values()].sort((a, b) => b.items.length - a.items.length);
+  }, [items]);
+  const visibleMentions = mapFilter === 'Top 10' ? mentions.slice(0, 10) : mentions;
+  const maxMentions = Math.max(1, ...mentions.map((entry) => entry.items.length));
+  const latest = [...items]
+    .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
+    .slice(0, 6);
+
+  const hasData = items.length > 0;
+  const feedHealthy = sources.length > 0 && healthyCount === sources.length;
 
   return (
     <>
       <section className="summary-bar">
         <div>
-          <span className="meta-label">Current date</span>
-          <strong>{currentDate}</strong>
+          <span className="meta-label">Current time</span>
+          <strong>{formatIsoDate(new Date(now).toISOString())}</strong>
         </div>
         <div>
           <span className="meta-label">Data freshness</span>
-          <strong className="success-text">Updated 6 min ago</strong>
+          <strong className={feedHealthy ? 'success-text' : undefined}>
+            {hasData ? `Updated ${relativeTime(feed.payload?.fetchedAt, now)}` : feed.loading ? 'Loading…' : 'No data yet'}
+          </strong>
         </div>
         <div>
-          <span className="meta-label">Active alerts</span>
-          <strong>7 channels</strong>
+          <span className="meta-label">Public sources</span>
+          <strong>{sources.length > 0 ? `${healthyCount} of ${sources.length} healthy` : 'Not checked'}</strong>
         </div>
         <div>
           <span className="meta-label">System mode</span>
-          <strong>DEMO MODE – NOT REAL-TIME</strong>
+          <strong className="success-text">
+            LIVE – PUBLIC WEB{pollMinutes ? ` (checked every ${pollMinutes} min)` : ''}
+          </strong>
         </div>
       </section>
 
+      {feed.error && (
+        <section className="panel">
+          <p className="muted-note">{feed.error}</p>
+        </section>
+      )}
+      {!hasData && !feed.error && (
+        <section className="panel">
+          <p className="muted-note">
+            {feed.loading ? 'Contacting public sources…' : 'Waiting for the first sync from public sources. This page refreshes automatically.'}
+          </p>
+        </section>
+      )}
+
       <section className="metrics-grid">
-        {dashboardMetrics.map((metric) => (
-          <article key={metric.label} className={`metric-card ${metric.tone}`}>
-            <div className="metric-header">
-              <span>{metric.label}</span>
-              <span className="metric-trend">{metric.change}</span>
-            </div>
-            <strong>{metric.value}</strong>
-          </article>
-        ))}
+        <article className="metric-card neutral">
+          <div className="metric-header"><span>Articles retained</span><span className="metric-trend">public RSS</span></div>
+          <strong>{items.length}</strong>
+        </article>
+        <article className="metric-card positive">
+          <div className="metric-header"><span>Published in last 24h</span><span className="metric-trend">by publisher time</span></div>
+          <strong>{last24h}</strong>
+        </article>
+        <article className="metric-card neutral">
+          <div className="metric-header"><span>Places named in headlines</span><span className="metric-trend">keyword match</span></div>
+          <strong>{mentions.length}</strong>
+        </article>
+        <article className={`metric-card ${feedHealthy ? 'positive' : 'warning'}`}>
+          <div className="metric-header"><span>Sources healthy</span><span className="metric-trend">connector status</span></div>
+          <strong>{healthyCount}/{sources.length}</strong>
+        </article>
       </section>
 
       <section className="content-grid top-row">
         <div className="panel large-panel map-panel">
           <div className="panel-header map-panel-header">
             <div>
-              <h3>Global risk map</h3>
-              <span className="map-subtitle">Regional security signals / DEMO DATA</span>
+              <h3>Global news map</h3>
+              <span className="map-subtitle">Places named in current public headlines / LIVE</span>
             </div>
             <div className="map-toolbar">
               <label className="map-filter-control">
-                <span className="sr-only">Filter map by risk</span>
+                <span className="sr-only">Filter map</span>
                 <select value={mapFilter} onChange={(event) => setMapFilter(event.target.value)}>
-                  <option>All risk</option>
-                  <option>Critical</option>
-                  <option>Elevated</option>
+                  <option>All mentioned</option>
+                  <option>Top 10</option>
                 </select>
               </label>
               <button className="ghost-button" onClick={() => mapRef.current?.setView([25, 35], 2)}>
@@ -235,61 +339,58 @@ function OverviewPanel() {
                   />
                 </LayersControl.BaseLayer>
               </LayersControl>
-              {visibleMarkers.map((marker) => (
+              {visibleMentions.map((entry) => (
                 <CircleMarker
-                  key={marker.name}
-                  center={[marker.latitude, marker.longitude]}
-                  radius={7}
-                  pathOptions={{
-                    color: '#e2e8f0',
-                    weight: 1.5,
-                    fillColor: riskColors[marker.tone as keyof typeof riskColors],
-                    fillOpacity: 0.9,
-                  }}
+                  key={entry.place.name}
+                  center={[entry.place.lat, entry.place.lng]}
+                  radius={5 + 14 * Math.sqrt(entry.items.length / maxMentions)}
+                  pathOptions={{ color: '#e2e8f0', weight: 1.5, fillColor: '#38bdf8', fillOpacity: 0.65 }}
                 >
-                  <Tooltip direction="top" offset={[0, -7]}>{marker.name}</Tooltip>
+                  <Tooltip direction="top">{entry.place.name}: {entry.items.length} article{entry.items.length === 1 ? '' : 's'}</Tooltip>
                   <Popup>
                     <div className="risk-popup">
-                      <span className={`badge ${marker.tone === 'critical' ? 'critical' : marker.tone === 'warning' ? 'warning' : 'neutral'}`}>
-                        {marker.tone === 'critical' ? 'Critical' : marker.tone === 'warning' ? 'Elevated' : 'Monitoring'}
-                      </span>
-                      <strong>{marker.name}</strong>
-                      <p>{marker.detail}</p>
+                      <strong>{entry.place.name}</strong>
+                      <p>{entry.items.length} article{entry.items.length === 1 ? '' : 's'} name this place.</p>
+                      {entry.items.slice(0, 3).map((item) => (
+                        <p key={item.id}>
+                          <a href={item.url} target="_blank" rel="noopener noreferrer">{item.headline}</a>
+                          <br /><small>{item.source}</small>
+                        </p>
+                      ))}
                     </div>
                   </Popup>
                 </CircleMarker>
               ))}
             </MapContainer>
             <div className="map-legend">
-              <span><i className="critical-dot" />Critical</span>
-              <span><i className="elevated-dot" />Elevated</span>
-              <span><i className="monitoring-dot" />Monitoring</span>
+              <span><i className="monitoring-dot" />Marker size = number of articles</span>
             </div>
           </div>
           <div className="map-footer">
-            <span>{visibleMarkers.length} of {regionMarkers.length} monitored locations</span>
-            <span>Zoom and drag to explore / select a marker for context</span>
+            <span>{visibleMentions.length} of {mentions.length} places shown</span>
+            <span>Place names are matched by keyword; this is not a risk rating. Select a marker for headlines.</span>
           </div>
         </div>
 
         <div className="panel medium-panel">
           <div className="panel-header">
-            <h3>Priority intelligence</h3>
+            <h3>Latest headlines</h3>
           </div>
           <div className="priority-list">
-            {priorityIntelligence.map((item) => (
-              <div key={item.title} className="priority-item">
+            {latest.length === 0 && <p className="muted-note">No articles retrieved yet.</p>}
+            {latest.map((item) => (
+              <div key={item.id} className="priority-item">
                 <div className="priority-row">
-                  <span className={`badge ${severityTone[item.severity as keyof typeof severityTone]}`}>
-                    {item.severity}
-                  </span>
-                  <span className="meta-label">{item.location}</span>
+                  <span className="badge neutral">{item.source}</span>
+                  <span className="meta-label">{relativeTime(item.publishedAt, now)}</span>
                 </div>
-                <strong>{item.title}</strong>
+                <strong>
+                  <a href={item.url} target="_blank" rel="noopener noreferrer">{item.headline}</a>
+                </strong>
                 <p>{item.summary}</p>
                 <div className="detail-row">
-                  <span>Reliability {item.reliability}</span>
-                  <span>{item.sources} sources</span>
+                  <span>{item.attribution}</span>
+                  <span>Unassessed</span>
                 </div>
               </div>
             ))}
@@ -300,16 +401,16 @@ function OverviewPanel() {
       <section className="content-grid charts-grid">
         <div className="panel">
           <div className="panel-header">
-            <h3>Incident volume and severity</h3>
+            <h3>Articles published per day (last 7 days)</h3>
           </div>
           <div className="bars">
-            {trendData.map((point) => (
-              <div key={point.date} className="bar-group">
+            {perDay.map((day) => (
+              <div key={day.key} className="bar-group">
                 <div className="bar-stack">
-                  <span style={{ height: `${point.volume}%` }} className="bar-volume" />
-                  <span style={{ height: `${point.severity}%` }} className="bar-severity" />
+                  <span style={{ height: `${Math.max(3, (day.count / maxPerDay) * 100)}%` }} className="bar-volume" />
                 </div>
-                <small>{point.date}</small>
+                <small>{day.label}</small>
+                <small>{day.count}</small>
               </div>
             ))}
           </div>
@@ -317,115 +418,73 @@ function OverviewPanel() {
 
         <div className="panel">
           <div className="panel-header">
-            <h3>Threat indicators and risk trend</h3>
-          </div>
-          <div className="line-mini">
-            {trendData.map((point) => (
-              <span key={point.date} className="line-point" style={{ height: `${point.political}%` }} />
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="content-grid lower-grid">
-        <div className="panel">
-          <div className="panel-header">
-            <h3>Analyst summary</h3>
-            <span className="status-pill neutral">AI-generated draft</span>
-          </div>
-          <ul className="summary-list">
-            {analystSummary.map((entry, index) => (
-              <li key={entry}>
-                <strong>{index + 1}.</strong>
-                <span>{entry}</span>
-                <span className="citation">[Source A{index + 1}]</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="panel">
-          <div className="panel-header">
-            <h3>Key incidents</h3>
-          </div>
-          <div className="incident-list">
-            {incidents.map((incident) => (
-              <div key={incident.id} className="incident-card">
-                <div className="incident-topline">
-                  <span className={`badge ${severityTone[incident.severity as keyof typeof severityTone]}`}>
-                    {incident.severity}
-                  </span>
-                  <span>{incident.date}</span>
-                </div>
-                <strong>{incident.title}</strong>
-                <div className="detail-row">
-                  <span>{incident.location}</span>
-                  <span>{incident.status}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="content-grid lower-grid">
-        <div className="panel">
-          <div className="panel-header">
-            <h3>Regional focus</h3>
+            <h3>Most-mentioned places</h3>
           </div>
           <div className="country-list">
-            {countryAssessments.map((country) => (
-              <div key={country.country} className="country-row">
-                <strong>{country.country}</strong>
-                <span className="badge warning">{country.risk}</span>
-                <span>{country.trend}</span>
-                <small>{country.confidence}</small>
+            {mentions.length === 0 && <p className="muted-note">No place names detected yet.</p>}
+            {mentions.slice(0, 8).map((entry) => (
+              <div key={entry.place.name} className="country-row">
+                <strong>{entry.place.name}</strong>
+                <span className="badge neutral">{entry.items.length} article{entry.items.length === 1 ? '' : 's'}</span>
               </div>
             ))}
           </div>
         </div>
+      </section>
+
+      <section className="content-grid lower-grid">
+        <div className="panel">
+          <div className="panel-header">
+            <h3>Source status</h3>
+          </div>
+          <div className="country-list">
+            {sources.map((source) => (
+              <div key={source.id} className="country-row">
+                <strong>{source.name}</strong>
+                <span className={`badge ${source.status === 'healthy' ? 'success' : source.status === 'not_checked' ? 'neutral' : 'warning'}`}>
+                  {source.status.replace('_', ' ')}
+                </span>
+                <span>{source.itemCount} articles</span>
+                <small>checked {relativeTime(source.lastCheckedAt, now)}</small>
+              </div>
+            ))}
+          </div>
+          <p className="muted-note">Status shows whether the connector could reach each publisher, not whether the reporting is accurate.</p>
+        </div>
 
         <div className="panel">
           <div className="panel-header">
-            <h3>Alert rules</h3>
+            <h3>About this data</h3>
           </div>
-          <ul className="rule-list">
-            {alertRules.map((rule) => (
-              <li key={rule}>{rule}</li>
-            ))}
-          </ul>
+          <p className="muted-note">
+            Articles come from publisher RSS feeds, are polled periodically, and appear here as published. Nothing on this page has been
+            verified, risk-rated or corroborated. Open the original article before acting on any item.
+          </p>
         </div>
       </section>
 
       <section className="feed-panel panel">
         <div className="panel-header">
-          <h3>Intelligence feed</h3>
-          <button className="ghost-button">Filter +</button>
+          <h3>Latest public reports</h3>
         </div>
         <table>
           <thead>
             <tr>
               <th>Headline</th>
               <th>Source</th>
-              <th>Country</th>
-              <th>Severity</th>
-              <th>Confidence</th>
-              <th>Review</th>
+              <th>Published</th>
+              <th>Retrieved</th>
+              <th>Status</th>
             </tr>
           </thead>
           <tbody>
-            {intelligenceFeed.map((item) => (
-              <tr key={item.headline}>
-                <td>{item.headline}</td>
+            {items.slice(0, 25).map((item) => (
+              <tr key={item.id}>
+                <td><a href={item.url} target="_blank" rel="noopener noreferrer">{item.headline}</a></td>
                 <td>{item.source}</td>
-                <td>{item.country}</td>
-                <td>
-                  <span className={`badge ${severityTone[item.severity as keyof typeof severityTone]}`}>
-                    {item.severity}
-                  </span>
-                </td>
-                <td>{item.confidence}</td>
-                <td>{item.reviewStatus}</td>
+                <td>{formatIsoDate(item.publishedAt)}</td>
+                <td>{relativeTime(item.retrievedAt, now)}</td>
+                <td>{item.verificationStatus}</td>
               </tr>
             ))}
           </tbody>
@@ -439,7 +498,7 @@ function IntelligenceFeedPanel() {
   const [items, setItems] = useState<FeedItem[]>(intelligenceFeed);
   const [publicItems, setPublicItems] = useState<FeedItem[]>([]);
   const [publicSources, setPublicSources] = useState<PublicFeedPayload['sources']>([]);
-  const [feedMode, setFeedMode] = useState<'Demo' | 'Public web'>('Demo');
+  const [feedMode, setFeedMode] = useState<'Demo' | 'Public web'>('Public web');
   const [loadingPublic, setLoadingPublic] = useState(false);
   const [publicError, setPublicError] = useState('');
   const [publicFetchedAt, setPublicFetchedAt] = useState('');
@@ -530,6 +589,10 @@ function IntelligenceFeedPanel() {
 
   const publicFeedReloadRef = useRef(loadPublicFeed);
   publicFeedReloadRef.current = loadPublicFeed;
+
+  useEffect(() => {
+    void publicFeedReloadRef.current();
+  }, []);
 
   useEffect(() => {
     if (feedMode !== 'Public web') return undefined;
@@ -1462,6 +1525,14 @@ function SourcesPanel() {
 
 function App() {
   const [activeView, setActiveView] = useState<(typeof navItems)[number]>('Overview');
+  const feed = usePublicFeed();
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const feedSources = feed.payload?.sources ?? [];
+  const feedLive = feedSources.length > 0 && feedSources.some((source) => source.status === 'healthy');
 
   return (
     <div className="app-shell">
@@ -1496,18 +1567,18 @@ function App() {
               <div className="eyebrow">Operational picture</div>
               <h2>{activeView}</h2>
             </div>
-            <button className="outline-button">Last refresh: 04:32 UTC</button>
+            <button className="outline-button">Last refresh: {feed.payload?.fetchedAt ? relativeTime(feed.payload.fetchedAt, clock) : 'pending'}</button>
           </div>
 
           <div className="header-actions">
             <div className="search-box">Search incidents, sources, countries…</div>
-            <div className="status-pill success">AI analysis online</div>
+            <div className={`status-pill ${feedLive ? 'success' : 'neutral'}`}>{feedLive ? 'Public feeds live' : 'Public feeds connecting'}</div>
             <div className="avatar">AM</div>
             <div className="theme-toggle">☾</div>
           </div>
         </header>
 
-        {activeView === 'Overview' && <OverviewPanel />}
+        {activeView === 'Overview' && <OverviewPanel feed={feed} />}
         {activeView === 'Intelligence Feed' && <IntelligenceFeedPanel />}
         {activeView === 'Threat Indicators' && <ThreatIndicatorsPanel />}
         {activeView === 'Incidents' && <IncidentDetailPanel />}
