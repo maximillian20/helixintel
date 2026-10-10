@@ -66,14 +66,18 @@ const allowedOrigins = new Set(
     .filter(Boolean),
 );
 
-app.use(cors({
-  origin(origin, callback) {
-    if (!origin || process.env.NODE_ENV !== 'production' || allowedOrigins.has(origin)) {
-      callback(null, true);
-      return;
+app.use(cors((req, callback) => {
+  const origin = req.headers.origin;
+  let sameHost = false;
+  if (origin) {
+    try {
+      sameHost = new URL(origin).host === req.headers.host;
+    } catch {
+      sameHost = false;
     }
-    callback(new Error('Origin is not allowed by CORS.'));
-  },
+  }
+  const allowed = !origin || process.env.NODE_ENV !== 'production' || allowedOrigins.has(origin) || sameHost;
+  callback(null, { origin: allowed });
 }));
 app.use(express.json({ limit: '64kb' }));
 
@@ -249,7 +253,7 @@ app.get('/api/health', (_req: Request, res: Response) => {
   const states = sourceStore.getSyncStates();
   res.json({
     status: 'ok',
-    mode: process.env.DEMO_MODE ?? 'demo',
+    mode: process.env.DEMO_MODE === 'true' ? 'demo' : 'live',
     timestamp: new Date().toISOString(),
     sourceSync: {
       scheduler: scheduler ? 'running' : 'stopped',
