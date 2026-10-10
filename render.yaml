@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: helixintel
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DEMO_MODE
+        value: "true"
+      - key: SOURCE_DB_PATH
+        value: /var/data/source-store.sqlite
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
