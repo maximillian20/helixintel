@@ -49,6 +49,43 @@ export type StoredArticle = NormalizedArticle & {
   attribution: string;
 };
 
+export type AssessmentRow = {
+  articleId: string;
+  severity: string;
+  impact: number;
+  scope: number;
+  urgency: number;
+  categories: string[];
+  strongCount: number;
+  deaths: number | null;
+  deathsStated: boolean;
+  injured: number | null;
+  hedged: boolean;
+  rationale: string;
+  countryCodes: string[];
+  classifierVersion: string;
+  classifiedAt: string;
+};
+
+export type UserItemState = {
+  articleId: string;
+  reviewStatus: 'Reviewed' | 'Unreviewed';
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+  severityOverride: string | null;
+  severityOverrideAt: string | null;
+  watchlisted: boolean;
+  watchlistedAt: string | null;
+};
+
+export type UserItemStatePatch = {
+  reviewStatus?: 'Reviewed' | 'Unreviewed';
+  reviewedBy?: string | null;
+  watchlisted?: boolean;
+  /** A severity string sets an override; null clears it. */
+  severityOverride?: string | null;
+};
+
 export type SourceChange = {
   changeId: number;
   sourceId: string;
@@ -115,6 +152,37 @@ export class SourceStore {
         owner_id TEXT NOT NULL,
         expires_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS item_assessments (
+        article_id TEXT PRIMARY KEY REFERENCES source_records(id) ON DELETE CASCADE,
+        severity TEXT NOT NULL,
+        impact INTEGER NOT NULL,
+        scope INTEGER NOT NULL,
+        urgency INTEGER NOT NULL,
+        categories_json TEXT NOT NULL,
+        strong_count INTEGER NOT NULL,
+        deaths INTEGER,
+        deaths_stated INTEGER NOT NULL DEFAULT 0,
+        injured INTEGER,
+        hedged INTEGER NOT NULL DEFAULT 0,
+        rationale TEXT NOT NULL,
+        country_codes_json TEXT NOT NULL,
+        classifier_version TEXT NOT NULL,
+        classified_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS item_user_state (
+        client_id TEXT NOT NULL,
+        article_id TEXT NOT NULL REFERENCES source_records(id) ON DELETE CASCADE,
+        review_status TEXT NOT NULL DEFAULT 'Unreviewed',
+        reviewed_at TEXT,
+        reviewed_by TEXT,
+        severity_override TEXT,
+        severity_override_at TEXT,
+        watchlisted INTEGER NOT NULL DEFAULT 0,
+        watchlisted_at TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (client_id, article_id)
+      );
+      CREATE INDEX IF NOT EXISTS item_user_state_watch_idx ON item_user_state(client_id, watchlisted);
     `);
     this.addColumnIfMissing('source_records', 'source_name', "TEXT NOT NULL DEFAULT ''");
     this.addColumnIfMissing('source_records', 'source_url', "TEXT NOT NULL DEFAULT ''");
@@ -328,6 +396,138 @@ export class SourceStore {
     return { status, consecutiveFailures: failures };
   }
 
+  countRecords() {
+    return Number((this.database.prepare('SELECT COUNT(*) AS total FROM source_records').get() as { total: number }).total);
+  }
+
+  getAssessments(): Map<string, AssessmentRow> {
+    const rows = this.database.prepare('SELECT * FROM item_assessments').all() as Array<Record<string, unknown>>;
+    return new Map(rows.map((value) => [String(value.article_id), {
+      articleId: String(value.article_id),
+      severity: String(value.severity),
+      impact: Number(value.impact),
+      scope: Number(value.scope),
+      urgency: Number(value.urgency),
+      categories: JSON.parse(String(value.categories_json)) as string[],
+      strongCount: Number(value.strong_count),
+      deaths: value.deaths === null ? null : Number(value.deaths),
+      deathsStated: Number(value.deaths_stated) === 1,
+      injured: value.injured === null ? null : Number(value.injured),
+      hedged: Number(value.hedged) === 1,
+      rationale: String(value.rationale),
+      countryCodes: JSON.parse(String(value.country_codes_json)) as string[],
+      classifierVersion: String(value.classifier_version),
+      classifiedAt: String(value.classified_at),
+    }]));
+  }
+
+  saveAssessments(rows: AssessmentRow[]) {
+    const upsert = this.database.prepare(`
+      INSERT INTO item_assessments (
+        article_id, severity, impact, scope, urgency, categories_json, strong_count, deaths, deaths_stated,
+        injured, hedged, rationale, country_codes_json, classifier_version, classified_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(article_id) DO UPDATE SET
+        severity = excluded.severity,
+        impact = excluded.impact,
+        scope = excluded.scope,
+        urgency = excluded.urgency,
+        categories_json = excluded.categories_json,
+        strong_count = excluded.strong_count,
+        deaths = excluded.deaths,
+        deaths_stated = excluded.deaths_stated,
+        injured = excluded.injured,
+        hedged = excluded.hedged,
+        rationale = excluded.rationale,
+        country_codes_json = excluded.country_codes_json,
+        classifier_version = excluded.classifier_version,
+        classified_at = excluded.classified_at
+    `);
+    const run = this.database.transaction(() => {
+      for (const row of rows) {
+        upsert.run(
+          row.articleId, row.severity, row.impact, row.scope, row.urgency, JSON.stringify(row.categories),
+          row.strongCount, row.deaths, row.deathsStated ? 1 : 0, row.injured, row.hedged ? 1 : 0,
+          row.rationale, JSON.stringify(row.countryCodes), row.classifierVersion, row.classifiedAt,
+        );
+      }
+    });
+    run();
+  }
+
+  getUserStates(clientId: string): Map<string, UserItemState> {
+    const rows = this.database.prepare('SELECT * FROM item_user_state WHERE client_id = ?').all(clientId);
+    return new Map(rows.map((row) => {
+      const state = this.mapUserState(row);
+      return [state.articleId, state];
+    }));
+  }
+
+  /** Applies a partial change to one client's state for one article. Returns undefined if the article does not exist. */
+  updateUserState(clientId: string, articleId: string, patch: UserItemStatePatch, now: string): UserItemState | undefined {
+    const exists = this.database.prepare('SELECT 1 AS found FROM source_records WHERE id = ?').get(articleId);
+    if (!exists) return undefined;
+
+    const apply = this.database.transaction(() => {
+      const row = this.database.prepare('SELECT * FROM item_user_state WHERE client_id = ? AND article_id = ?').get(clientId, articleId);
+      const current: UserItemState = row ? this.mapUserState(row) : {
+        articleId,
+        reviewStatus: 'Unreviewed',
+        reviewedAt: null,
+        reviewedBy: null,
+        severityOverride: null,
+        severityOverrideAt: null,
+        watchlisted: false,
+        watchlistedAt: null,
+      };
+      const next = { ...current };
+
+      if (patch.reviewStatus !== undefined) {
+        next.reviewStatus = patch.reviewStatus;
+        if (patch.reviewStatus === 'Reviewed') {
+          if (current.reviewStatus !== 'Reviewed') next.reviewedAt = now;
+          next.reviewedBy = patch.reviewedBy ?? current.reviewedBy;
+        } else {
+          next.reviewedAt = null;
+          next.reviewedBy = null;
+        }
+      }
+      if (patch.watchlisted !== undefined) {
+        next.watchlisted = patch.watchlisted;
+        if (patch.watchlisted) {
+          if (!current.watchlisted) next.watchlistedAt = now;
+        } else {
+          next.watchlistedAt = null;
+        }
+      }
+      if (patch.severityOverride !== undefined) {
+        next.severityOverride = patch.severityOverride;
+        next.severityOverrideAt = patch.severityOverride === null ? null : now;
+      }
+
+      this.database.prepare(`
+        INSERT INTO item_user_state (
+          client_id, article_id, review_status, reviewed_at, reviewed_by, severity_override,
+          severity_override_at, watchlisted, watchlisted_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(client_id, article_id) DO UPDATE SET
+          review_status = excluded.review_status,
+          reviewed_at = excluded.reviewed_at,
+          reviewed_by = excluded.reviewed_by,
+          severity_override = excluded.severity_override,
+          severity_override_at = excluded.severity_override_at,
+          watchlisted = excluded.watchlisted,
+          watchlisted_at = excluded.watchlisted_at,
+          updated_at = excluded.updated_at
+      `).run(
+        clientId, articleId, next.reviewStatus, next.reviewedAt, next.reviewedBy, next.severityOverride,
+        next.severityOverrideAt, next.watchlisted ? 1 : 0, next.watchlistedAt, now,
+      );
+      return next;
+    });
+    return apply();
+  }
+
   close() {
     this.database.close();
   }
@@ -337,6 +537,20 @@ export class SourceStore {
     if (!columns.some((item) => item.name === column)) {
       this.database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`);
     }
+  }
+
+  private mapUserState(row: unknown): UserItemState {
+    const value = row as Record<string, unknown>;
+    return {
+      articleId: String(value.article_id),
+      reviewStatus: value.review_status === 'Reviewed' ? 'Reviewed' : 'Unreviewed',
+      reviewedAt: value.reviewed_at ? String(value.reviewed_at) : null,
+      reviewedBy: value.reviewed_by ? String(value.reviewed_by) : null,
+      severityOverride: value.severity_override ? String(value.severity_override) : null,
+      severityOverrideAt: value.severity_override_at ? String(value.severity_override_at) : null,
+      watchlisted: Number(value.watchlisted) === 1,
+      watchlistedAt: value.watchlisted_at ? String(value.watchlisted_at) : null,
+    };
   }
 
   private mapSyncState(row: unknown): SyncState {
