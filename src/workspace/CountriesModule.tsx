@@ -202,6 +202,7 @@ function CountryDetailView({ code, onBack, onNavigate }: { code: string; onBack:
             {detail.watched ? 'Remove from watchlist' : 'Add to watchlist'}
           </button>
           <button className="outline-button" onClick={() => setAssessing(true)}>{detail.latest ? 'Update assessment' : 'Create assessment'}</button>
+          {detail.latest && <button className="outline-button" onClick={() => onNavigate('SIBs', `country:${code}`)}>Create SIB</button>}
         </div>
       </div>
       {error && <Notice kind="error">{error}</Notice>}

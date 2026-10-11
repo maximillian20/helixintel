@@ -303,6 +303,7 @@ function IncidentDetailView({ id, onBack, onNavigate }: { id: string; onBack: ()
         </div>
         <div className="feed-heading-actions">
           <button className="outline-button" onClick={() => setBriefOpen(true)}>Incident brief</button>
+          <button className="outline-button" onClick={() => onNavigate('SIBs', `incident:${incident.id}`)}>Create SIB</button>
           {!editing && <button className="outline-button" onClick={startEdit}>Edit details</button>}
         </div>
       </div>
