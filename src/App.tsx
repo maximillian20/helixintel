@@ -1,22 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { openSharedEvents } from './data/eventHub.ts';
 import type { Map as LeafletMap } from 'leaflet';
 import { CircleMarker, LayersControl, MapContainer, Popup, TileLayer, Tooltip } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import {
-  alertFeed,
-  countryAssessmentDetails,
-  countryAssessments,
-  incidentDetails,
-  intelligenceFeed,
-  sibDraft,
-  threatIndicators,
-  watchlists,
-} from './data/demo.ts';
+import { alertFeed, sibDraft, watchlists } from './data/demo.ts';
+import { AlertsBell, AnalystMenu } from './workspace/AlertsBell.tsx';
+import { AddToCountryDialog, CountriesModule } from './workspace/CountriesModule.tsx';
+import { IncidentLinkDialog, IncidentsModule } from './workspace/IncidentsModule.tsx';
+import { IndicatorsModule } from './workspace/IndicatorsModule.tsx';
+import type { Navigate } from './workspace/shared.tsx';
 import { findPlaces, type Place } from './data/geo.ts';
 import {
   GLOBAL_CODE,
   UNKNOWN_CODE,
-  countries,
   countryName,
   sortedCountries,
 } from './data/countries.ts';
@@ -27,7 +23,6 @@ import {
   SEVERITIES,
   hasActiveFilters,
   matchesFilters,
-  type ConfidenceLevel,
   ASSESSMENT_METHOD_LABELS,
   SEVERITY_COLORS,
   SEVERITY_RANK,
@@ -165,7 +160,7 @@ function usePublicFeed() {
 
   useEffect(() => {
     void load();
-    const events = new EventSource('/api/events');
+    const events = openSharedEvents();
     let timer: number | undefined;
     const reloadSoon = () => {
       if (timer !== undefined) window.clearTimeout(timer);
@@ -202,7 +197,7 @@ function useOverviewItems() {
 
   useEffect(() => {
     void load();
-    const events = new EventSource('/api/events');
+    const events = openSharedEvents();
     let timer: number | undefined;
     const reloadSoon = () => {
       if (timer !== undefined) window.clearTimeout(timer);
@@ -606,10 +601,6 @@ const feedPageSize = 20;
 type ViewItem = FeedItemDto & {
   sourceType: string;
   reliability: string;
-  locationText?: string;
-  region?: string;
-  entities?: string;
-  relevance?: string;
 };
 
 function severityClass(severity: string) {
@@ -626,57 +617,6 @@ function SeverityBadge({ severity, manual }: { severity: string; manual?: boolea
 
 function toViewItem(item: FeedItemDto): ViewItem {
   return { ...item, sourceType: 'Publisher RSS', reliability: 'Not assessed' };
-}
-
-const demoCountryCodes = new Map(countries.map((country) => [country.name, country.code]));
-
-function demoToViewItem(item: (typeof intelligenceFeed)[number], index: number): ViewItem {
-  const legacy: Record<string, Severity> = { Moderate: 'Medium', Watch: 'Low', Monitoring: 'Low' };
-  const severity = (SEVERITIES as readonly string[]).includes(item.severity)
-    ? item.severity as Severity
-    : legacy[item.severity] ?? 'Unassessed';
-  const code = item.country === 'Global' ? GLOBAL_CODE : demoCountryCodes.get(item.country) ?? UNKNOWN_CODE;
-  const confidence = ['High', 'Medium', 'Low'].includes(item.confidence) ? item.confidence as ConfidenceLevel : 'Not assessed';
-  return {
-    id: `demo:${index}`,
-    headline: item.headline,
-    summary: item.summary,
-    url: item.url,
-    source: item.source,
-    sourceUrl: '',
-    attribution: item.source,
-    publishedAt: item.date,
-    sourceModifiedAt: null,
-    retrievedAt: item.date,
-    lastCheckedAt: item.date,
-    verificationStatus: 'demo',
-    sourceId: 'demo',
-    category: item.type,
-    location: null,
-    assessmentMethod: 'rules',
-    severity,
-    assessedSeverity: severity,
-    severityOverridden: false,
-    severityOverriddenAt: null,
-    severityRationale: 'Demo data: this severity is illustrative and was not calculated from the report.',
-    assessmentConfidence: confidence,
-    categories: [],
-    categoryLabels: [item.type],
-    corroboratingReports: 0,
-    countries: [{ code, name: code === UNKNOWN_CODE ? item.country : countryName(code) }],
-    countryStatus: code === GLOBAL_CODE ? 'global' : code === UNKNOWN_CODE ? 'unknown' : 'identified',
-    reviewStatus: item.reviewStatus === 'Reviewed' ? 'Reviewed' : 'Unreviewed',
-    reviewedAt: null,
-    reviewedBy: null,
-    watchlisted: item.watchlist,
-    watchlistedAt: null,
-    sourceType: item.sourceType,
-    reliability: item.reliability,
-    locationText: item.location,
-    region: item.region,
-    entities: item.entities,
-    relevance: item.relevance,
-  };
 }
 
 function countryText(item: FeedItemDto, limit = 3) {
@@ -723,7 +663,7 @@ function usePublicFeedItems(enabled: boolean, filters: FeedFilters, page: number
 
   useEffect(() => {
     if (!enabled) return undefined;
-    const events = new EventSource('/api/events');
+    const events = openSharedEvents();
     let timer: number | undefined;
     const refresh = () => {
       if (timer !== undefined) window.clearTimeout(timer);
@@ -740,9 +680,9 @@ function usePublicFeedItems(enabled: boolean, filters: FeedFilters, page: number
   return { data, dataRequestedPage, loading, error, reload: () => setReloadToken((token) => token + 1) };
 }
 
-function IntelligenceFeedPanel({ feed }: { feed: PublicFeedState }) {
-  const [feedMode, setFeedMode] = useState<'Demo' | 'Public web'>('Public web');
-  const [demoItems, setDemoItems] = useState<ViewItem[]>(() => intelligenceFeed.map(demoToViewItem));
+function IntelligenceFeedPanel({ feed, onNavigate }: { feed: PublicFeedState; onNavigate: Navigate }) {
+  const [dialog, setDialog] = useState<{ ids: string[]; mode: 'create' | 'existing' } | null>(null);
+  const [countryDialog, setCountryDialog] = useState<ViewItem | null>(null);
   const [filters, setFilters] = useState<FeedFilters>(DEFAULT_FEED_FILTERS);
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState('');
@@ -751,30 +691,28 @@ function IntelligenceFeedPanel({ feed }: { feed: PublicFeedState }) {
   const [actionError, setActionError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
-  const isDemo = feedMode === 'Demo';
   const debouncedSearch = useDebounced(filters.search, 300);
   const serverFilters = useMemo<FeedFilters>(
     () => ({ ...filters, search: debouncedSearch }),
     [filters, debouncedSearch],
   );
-  const publicFeed = usePublicFeedItems(!isDemo, serverFilters, page);
+  const publicFeed = usePublicFeedItems(true, serverFilters, page);
   const pageData = publicFeed.data;
 
-  const demoFiltered = useMemo(() => demoItems.filter((item) => matchesFilters(item, filters)), [demoItems, filters]);
-  const items: ViewItem[] = isDemo ? demoFiltered : (pageData?.items ?? []).map(toViewItem);
-  const total = isDemo ? demoFiltered.length : pageData?.total ?? 0;
-  const datasetTotal = isDemo ? demoItems.length : pageData?.datasetTotal ?? 0;
-  const watchlistTotal = isDemo ? demoItems.filter((item) => item.watchlisted).length : pageData?.watchlistTotal ?? 0;
-  const totalPages = isDemo ? 1 : pageData?.totalPages ?? 1;
-  const currentPage = isDemo ? 1 : page;
-  const loading = !isDemo && publicFeed.loading;
-  const error = isDemo ? '' : publicFeed.error;
+  const items: ViewItem[] = (pageData?.items ?? []).map(toViewItem);
+  const total = pageData?.total ?? 0;
+  const datasetTotal = pageData?.datasetTotal ?? 0;
+  const watchlistTotal = pageData?.watchlistTotal ?? 0;
+  const totalPages = pageData?.totalPages ?? 1;
+  const currentPage = page;
+  const loading = publicFeed.loading;
+  const error = publicFeed.error;
   const filtersActive = hasActiveFilters(filters);
 
   useEffect(() => {
     // Only follow the server's page clamp for the page that was actually requested, not for stale data.
-    if (!isDemo && pageData && publicFeed.dataRequestedPage === page && pageData.page !== page) setPage(pageData.page);
-  }, [isDemo, pageData, page, publicFeed.dataRequestedPage]);
+    if (pageData && publicFeed.dataRequestedPage === page && pageData.page !== page) setPage(pageData.page);
+  }, [pageData, page, publicFeed.dataRequestedPage]);
 
   const selectedItem = items.find((item) => item.id === selectedId)
     ?? (selectedId && selectedCache?.id === selectedId ? selectedCache : undefined)
@@ -798,14 +736,6 @@ function IntelligenceFeedPanel({ feed }: { feed: PublicFeedState }) {
   function selectItem(item: ViewItem) {
     setSelectedId(item.id);
     setSelectedCache(item);
-  }
-
-  function switchMode(mode: 'Demo' | 'Public web') {
-    setFeedMode(mode);
-    setPage(1);
-    setSelectedId('');
-    setSelectedCache(null);
-    setActionError('');
   }
 
   async function refreshPublic() {
@@ -836,43 +766,23 @@ function IntelligenceFeedPanel({ feed }: { feed: PublicFeedState }) {
     }
   }
 
-  function changeDemoState(item: ViewItem, patch: Partial<ViewItem>) {
-    setDemoItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, ...patch } : entry)));
-  }
-
   function toggleReview(item: ViewItem) {
     const next = item.reviewStatus === 'Reviewed' ? 'Unreviewed' : 'Reviewed';
-    if (isDemo) {
-      changeDemoState(item, { reviewStatus: next, reviewedAt: next === 'Reviewed' ? new Date().toISOString() : null });
-    } else {
-      void changePublicState(item, { reviewStatus: next });
-    }
+    void changePublicState(item, { reviewStatus: next });
   }
 
   function toggleWatchlist(item: ViewItem) {
-    if (isDemo) {
-      changeDemoState(item, { watchlisted: !item.watchlisted });
-    } else {
-      void changePublicState(item, { watchlisted: !item.watchlisted });
-    }
+    void changePublicState(item, { watchlisted: !item.watchlisted });
   }
 
   function overrideSeverity(item: ViewItem, value: Severity | null) {
-    if (isDemo) {
-      changeDemoState(item, {
-        severity: value ?? item.assessedSeverity,
-        severityOverridden: value !== null,
-        severityOverriddenAt: value !== null ? new Date().toISOString() : null,
-      });
-    } else {
-      void changePublicState(item, { severityOverride: value });
-    }
+    void changePublicState(item, { severityOverride: value });
   }
 
   const needsReviewActive = !filters.watchlistOnly && filters.review === 'Unreviewed';
   const allActive = !filters.watchlistOnly && !needsReviewActive;
   const firstShown = total === 0 ? 0 : (currentPage - 1) * feedPageSize + 1;
-  const lastShown = isDemo ? total : Math.min(total, currentPage * feedPageSize);
+  const lastShown = Math.min(total, currentPage * feedPageSize);
   const publicSources = feed.payload?.sources ?? [];
   const publicFetchedAt = feed.payload?.fetchedAt ?? '';
 
@@ -950,6 +860,8 @@ function IntelligenceFeedPanel({ feed }: { feed: PublicFeedState }) {
             >
               {item.watchlisted ? 'Remove from watchlist' : 'Add to watchlist'}
             </button>
+            <button className="ghost-button small" onClick={() => setDialog({ ids: [item.id], mode: 'create' })}>Create incident</button>
+            <button className="ghost-button small" onClick={() => setDialog({ ids: [item.id], mode: 'existing' })}>Add to existing incident</button>
           </div>
         </article>
       );
@@ -960,32 +872,18 @@ function IntelligenceFeedPanel({ feed }: { feed: PublicFeedState }) {
     <div className="module-view">
       <div className="module-header">
         <div>
-          <div className="eyebrow">{isDemo ? 'Demo dataset' : 'Publisher RSS / public web'}</div>
+          <div className="eyebrow">Connected public sources</div>
           <h2>Intelligence feed</h2>
         </div>
         <div className="feed-heading-actions">
-          <div className="feed-mode-switch" role="group" aria-label="Feed source mode">
-            <button
-              className={isDemo ? 'selected' : ''}
-              onClick={() => switchMode('Demo')}
-              aria-pressed={isDemo}
-            >
-              Demo
-            </button>
-            <button
-              className={!isDemo ? 'selected' : ''}
-              onClick={() => (isDemo ? switchMode('Public web') : void refreshPublic())}
-              aria-pressed={!isDemo}
-              disabled={refreshing}
-            >
-              {refreshing ? 'Fetching...' : isDemo ? 'Public web' : 'Refresh public'}
-            </button>
-          </div>
+          <button className="outline-button" onClick={() => void refreshPublic()} disabled={refreshing}>
+            {refreshing ? 'Checking sources...' : 'Check sources now'}
+          </button>
           <span className="status-pill neutral" aria-live="polite">{total} of {datasetTotal} reports</span>
         </div>
       </div>
 
-      {!isDemo && (
+      {(
         <section className="public-feed-status" aria-live="polite">
           <div>
             <strong>Publisher-provided reporting</strong>
@@ -1131,19 +1029,15 @@ function IntelligenceFeedPanel({ feed }: { feed: PublicFeedState }) {
 
             <dl className="feed-facts">
               <div><dt>Source</dt><dd>{selectedItem.source}</dd></div>
-              <div><dt>Source type</dt><dd>{selectedItem.sourceType}</dd></div>
               <div><dt>Published</dt><dd>{formatIsoDate(selectedItem.publishedAt)}</dd></div>
               {selectedItem.sourceModifiedAt && <div><dt>Source modified</dt><dd>{formatIsoDate(selectedItem.sourceModifiedAt)}</dd></div>}
-              {!isDemo && <div><dt>Retrieved by app</dt><dd>{formatIsoDate(selectedItem.retrievedAt)}</dd></div>}
-              {!isDemo && <div><dt>Source last checked</dt><dd>{formatIsoDate(selectedItem.lastCheckedAt)}</dd></div>}
+              {<div><dt>Retrieved by app</dt><dd>{formatIsoDate(selectedItem.retrievedAt)}</dd></div>}
+              {<div><dt>Source last checked</dt><dd>{formatIsoDate(selectedItem.lastCheckedAt)}</dd></div>}
               <div><dt>Countries</dt><dd>{selectedItem.countries.map((country) => country.name).join(', ')}</dd></div>
-              {(selectedItem.location || selectedItem.locationText) && <div><dt>Location</dt><dd>{selectedItem.location?.label ?? selectedItem.locationText}</dd></div>}
-              {!isDemo && <div><dt>Assessment method</dt><dd>{ASSESSMENT_METHOD_LABELS[selectedItem.assessmentMethod]}</dd></div>}
+              {selectedItem.location && <div><dt>Location</dt><dd>{selectedItem.location.label}</dd></div>}
+              {<div><dt>Assessment method</dt><dd>{ASSESSMENT_METHOD_LABELS[selectedItem.assessmentMethod]}</dd></div>}
               <div><dt>Category</dt><dd>{selectedItem.categoryLabels.length > 0 ? selectedItem.categoryLabels.join(', ') : 'None detected'}</dd></div>
-              <div><dt>Reliability</dt><dd>{selectedItem.reliability}</dd></div>
               <div><dt>Assessment confidence</dt><dd>{selectedItem.assessmentConfidence}</dd></div>
-              {selectedItem.entities && <div><dt>Entities</dt><dd>{selectedItem.entities}</dd></div>}
-              {selectedItem.relevance && <div><dt>Relevance</dt><dd>{selectedItem.relevance}</dd></div>}
               {selectedItem.reviewedAt && <div><dt>Reviewed</dt><dd>{formatIsoDate(selectedItem.reviewedAt)}{selectedItem.reviewedBy ? ` by ${selectedItem.reviewedBy}` : ''}</dd></div>}
               {selectedItem.watchlistedAt && <div><dt>Added to watchlist</dt><dd>{formatIsoDate(selectedItem.watchlistedAt)}</dd></div>}
             </dl>
@@ -1165,378 +1059,33 @@ function IntelligenceFeedPanel({ feed }: { feed: PublicFeedState }) {
                 {selectedItem.watchlisted ? 'Remove from watchlist' : 'Add to watchlist'}
               </button>
             </div>
+            <div className="feed-detail-actions">
+              <button className="outline-button" onClick={() => setDialog({ ids: [selectedItem.id], mode: 'create' })}>Create incident</button>
+              <button className="outline-button" onClick={() => setDialog({ ids: [selectedItem.id], mode: 'existing' })}>Add to existing incident</button>
+              <button className="ghost-button" onClick={() => setCountryDialog(selectedItem)}>Add to country assessment</button>
+            </div>
             <a className="source-link" href={selectedItem.url} target="_blank" rel="noreferrer">Open publisher article</a>
             {selectedItem.sourceUrl && <a className="source-link" href={selectedItem.sourceUrl} target="_blank" rel="noreferrer">View publisher feed</a>}
             <p className="muted-note">
-              {isDemo
-                ? 'Demo content for workflow testing. Source links are placeholders; verify reports before acting.'
-                : 'Publisher-provided headline and summary. Severity is a rules-based estimate (impact, scope, urgency, source, corroboration), not an analyst judgement; your corrections are kept when the feed updates. Confidence reflects how much explicit evidence the text gives, not whether the report is true. Review, watchlist and severity choices are saved for this browser.'}
+              {'Publisher-provided headline and summary. Severity is a rules-based estimate (impact, scope, urgency, source, corroboration), not an analyst judgement; your corrections are kept when the feed updates. Confidence reflects how much explicit evidence the text gives, not whether the report is true. Review, watchlist and severity choices are saved for this browser.'}
             </p>
           </aside>
         ) : (
           <aside className="panel feed-detail feed-empty-detail">Select a report to inspect its source and assessment metadata.</aside>
         )}
       </div>
-    </div>
-  );
-}
-
-function ThreatIndicatorsPanel() {
-  const [signals, setSignals] = useState(threatIndicators);
-  const [search, setSearch] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('All');
-  const [countryFilter, setCountryFilter] = useState('All');
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [quickFilter, setQuickFilter] = useState<'All signals' | 'Worsening' | 'Watchlisted'>('All signals');
-  const [selectedId, setSelectedId] = useState(signals[0]?.id ?? '');
-
-  const filteredSignals = signals.filter((signal) => {
-    const query = search.trim().toLowerCase();
-    const matchesSearch = !query || [
-      signal.name,
-      signal.category,
-      signal.geography,
-      signal.country,
-      signal.rationale,
-    ].join(' ').toLowerCase().includes(query);
-
-    return matchesSearch
-      && (categoryFilter === 'All' || signal.category === categoryFilter)
-      && (countryFilter === 'All' || signal.country === countryFilter)
-      && (statusFilter === 'All' || signal.status === statusFilter)
-      && (quickFilter !== 'Worsening' || signal.status === 'Worsening')
-      && (quickFilter !== 'Watchlisted' || signal.watchlisted);
-  });
-
-  const selectedSignal = filteredSignals.find((signal) => signal.id === selectedId) ?? filteredSignals[0];
-  const worseningCount = signals.filter((signal) => signal.status === 'Worsening').length;
-  const monitoredCount = signals.filter((signal) => signal.watchlisted).length;
-  const elevatedCount = signals.filter((signal) => signal.level === 'High' || signal.level === 'Elevated').length;
-  const hasFilters = search !== '' || categoryFilter !== 'All' || countryFilter !== 'All'
-    || statusFilter !== 'All' || quickFilter !== 'All signals';
-
-  function resetFilters() {
-    setSearch('');
-    setCategoryFilter('All');
-    setCountryFilter('All');
-    setStatusFilter('All');
-    setQuickFilter('All signals');
-  }
-
-  function toggleWatchlist() {
-    if (!selectedSignal) return;
-    setSignals((currentSignals) => currentSignals.map((signal) => (
-      signal.id === selectedSignal.id ? { ...signal, watchlisted: !signal.watchlisted } : signal
-    )));
-  }
-
-  return (
-    <div className="module-view">
-      <div className="module-header">
-        <div>
-          <div className="eyebrow">Early-warning monitor / demo dataset</div>
-          <h2>Threat indicators</h2>
-        </div>
-        <span className="status-pill neutral">Illustrative signals only</span>
-      </div>
-
-      <section className="indicator-metrics" aria-label="Indicator summary">
-        <article className="metric-card neutral"><span>Tracked signals</span><strong>{signals.length}</strong></article>
-        <article className="metric-card critical"><span>Worsening</span><strong>{worseningCount}</strong></article>
-        <article className="metric-card warning"><span>Elevated / high</span><strong>{elevatedCount}</strong></article>
-        <article className="metric-card positive"><span>Watchlisted</span><strong>{monitoredCount}</strong></article>
-      </section>
-
-      <div className="indicator-workspace">
-        <section className="panel indicator-register" aria-label="Threat indicator register">
-          <div className="indicator-filters">
-            <label className="indicator-search">
-              <span className="sr-only">Search indicators</span>
-              <input
-                type="search"
-                placeholder="Search indicators, places, rationale..."
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </label>
-            <label className="filter-select">
-              <span>Category</span>
-              <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
-                <option>All</option>
-                {[...new Set(signals.map((signal) => signal.category))].sort().map((category) => (
-                  <option key={category}>{category}</option>
-                ))}
-              </select>
-            </label>
-            <label className="filter-select">
-              <span>Country</span>
-              <select value={countryFilter} onChange={(event) => setCountryFilter(event.target.value)}>
-                <option>All</option>
-                {[...new Set(signals.map((signal) => signal.country))].sort().map((country) => (
-                  <option key={country}>{country}</option>
-                ))}
-              </select>
-            </label>
-            <label className="filter-select">
-              <span>Trend</span>
-              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-                <option>All</option>
-                {[...new Set(signals.map((signal) => signal.status))].sort().map((status) => (
-                  <option key={status}>{status}</option>
-                ))}
-              </select>
-            </label>
-            {hasFilters && <button className="ghost-button" onClick={resetFilters}>Reset</button>}
-          </div>
-
-          <div className="indicator-quick-filters" role="group" aria-label="Indicator quick filters">
-            {(['All signals', 'Worsening', 'Watchlisted'] as const).map((filter) => (
-              <button
-                key={filter}
-                className={quickFilter === filter ? 'selected' : ''}
-                onClick={() => setQuickFilter(filter)}
-                aria-pressed={quickFilter === filter}
-              >
-                {filter}
-              </button>
-            ))}
-            <span>{filteredSignals.length} signals</span>
-          </div>
-
-          <div className="indicator-table-head" aria-hidden="true">
-            <span>Indicator</span><span>Geography</span><span>Level</span><span>Trend</span><span>Recent pattern</span>
-          </div>
-          <div className="indicator-list" aria-live="polite">
-            {filteredSignals.length === 0 ? (
-              <div className="feed-empty">No indicators match these filters.</div>
-            ) : filteredSignals.map((signal) => (
-              <button
-                key={signal.id}
-                className={`indicator-row ${selectedSignal?.id === signal.id ? 'selected' : ''}`}
-                onClick={() => setSelectedId(signal.id)}
-                aria-pressed={selectedSignal?.id === signal.id}
-              >
-                <span className="indicator-name">
-                  <strong>{signal.name}</strong>
-                  <small>{signal.id} / {signal.category}</small>
-                </span>
-                <span className="indicator-place">{signal.geography}<small>{signal.country}</small></span>
-                <span><span className={`badge ${signal.level === 'High' ? 'critical' : signal.level === 'Elevated' ? 'warning' : 'neutral'}`}>{signal.level}</span></span>
-                <span className={`indicator-status ${signal.status.toLowerCase()}`}>{signal.status}</span>
-                <span className="indicator-spark" aria-label="Recent seven-period trend">
-                  {signal.trend.map((point, index) => (
-                    <i key={`${signal.id}-${index}`} style={{ height: `${point}%` }} />
-                  ))}
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        {selectedSignal ? (
-          <aside className="panel indicator-detail" aria-label="Selected indicator details">
-            <div className="panel-header">
-              <span className={`indicator-status ${selectedSignal.status.toLowerCase()}`}>{selectedSignal.status}</span>
-              <span className={`badge ${selectedSignal.level === 'High' ? 'critical' : selectedSignal.level === 'Elevated' ? 'warning' : 'neutral'}`}>{selectedSignal.level}</span>
-            </div>
-            <div className="eyebrow">{selectedSignal.id} / {selectedSignal.category}</div>
-            <h3>{selectedSignal.name}</h3>
-
-            <div className="indicator-current">
-              <div><span className="meta-label">Current reading</span><strong>{selectedSignal.currentValue}</strong><small>{selectedSignal.unit}</small></div>
-              <div><span className="meta-label">Baseline</span><strong>{selectedSignal.baselineValue}</strong><small>{selectedSignal.unit}</small></div>
-            </div>
-
-            <div className="indicator-detail-chart" aria-label="Illustrative trend over seven periods">
-              {selectedSignal.trend.map((point, index) => (
-                <div key={`${selectedSignal.id}-detail-${index}`}>
-                  <span style={{ height: `${point}%` }} />
-                  <small>{index + 1}</small>
-                </div>
-              ))}
-            </div>
-            <p className="indicator-chart-caption">Relative signal activity / last 7 periods</p>
-
-            <dl className="feed-facts">
-              <div><dt>Geography</dt><dd>{selectedSignal.geography}, {selectedSignal.country}</dd></div>
-              <div><dt>Confidence</dt><dd>{selectedSignal.confidence}</dd></div>
-              <div><dt>Source reliability</dt><dd>{selectedSignal.reliability}</dd></div>
-              <div><dt>First observed</dt><dd>{formatIsoDate(selectedSignal.firstObserved)}</dd></div>
-              <div><dt>Last updated</dt><dd>{formatIsoDate(selectedSignal.lastUpdated)}</dd></div>
-            </dl>
-
-            <div className="indicator-rationale">
-              <h4>Analyst interpretation</h4>
-              <p>{selectedSignal.rationale}</p>
-            </div>
-
-            <div className="indicator-sources">
-              <h4>Source provenance</h4>
-              {selectedSignal.sources.map((source) => (
-                <div key={source.name}>
-                  <span><strong>{source.name}</strong><small>{source.type}</small></span>
-                  <span className="badge neutral">Reliability {source.reliability}</span>
-                </div>
-              ))}
-            </div>
-
-            <button className="outline-button indicator-watch-button" onClick={toggleWatchlist} aria-pressed={selectedSignal.watchlisted}>
-              {selectedSignal.watchlisted ? 'Remove from watchlist' : 'Add to watchlist'}
-            </button>
-            <p className="muted-note">Demo values and trend points are illustrative, not live measurements. Validate signals against original sources before acting.</p>
-          </aside>
-        ) : (
-          <aside className="panel indicator-detail feed-empty-detail">Select a signal to inspect its trend and source provenance.</aside>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function IncidentDetailPanel() {
-  const incident = incidentDetails[0];
-
-  return (
-    <div className="module-view">
-      <div className="module-header">
-        <div>
-          <div className="eyebrow">Incident analysis</div>
-          <h2>{incident.title}</h2>
-        </div>
-        <button className="outline-button">Create incident review</button>
-      </div>
-
-      <div className="incident-layout">
-        <div className="panel">
-          <div className="panel-header">
-            <h3>Event summary</h3>
-            <span className={`badge ${severityTone[incident.severity as keyof typeof severityTone]}`}>{incident.severity}</span>
-          </div>
-          <div className="facts-grid">
-            <div><span className="meta-label">Incident ID</span><strong>{incident.id}</strong></div>
-            <div><span className="meta-label">Date and time</span><strong>{formatIsoDate(incident.date)}</strong></div>
-            <div><span className="meta-label">Country</span><strong>{incident.country}</strong></div>
-            <div><span className="meta-label">Region</span><strong>{incident.region}</strong></div>
-            <div><span className="meta-label">Coordinates</span><strong>{incident.coordinates}</strong></div>
-            <div><span className="meta-label">Current status</span><strong>{incident.status}</strong></div>
-          </div>
-
-          <div className="detail-block">
-            <h4>Description</h4>
-            <p>{incident.description}</p>
-          </div>
-
-          <div className="detail-block">
-            <h4>What happened?</h4>
-            <p>{incident.trigger}</p>
-          </div>
-
-          <div className="detail-block">
-            <h4>Who was involved?</h4>
-            <p>{incident.actors}</p>
-          </div>
-        </div>
-
-        <div className="panel">
-          <div className="panel-header">
-            <h3>Impact assessment</h3>
-          </div>
-          <div className="impact-stack">
-            <div>
-              <span className="meta-label">Operational impact</span>
-              <p>{incident.operationalImpact}</p>
-            </div>
-            <div>
-              <span className="meta-label">Business impact</span>
-              <p>{incident.businessImpact}</p>
-            </div>
-            <div>
-              <span className="meta-label">Human-rights impact</span>
-              <p>{incident.rightsImpact}</p>
-            </div>
-          </div>
-          <ul className="action-list">
-            {incident.recommendedActions.map((action) => (
-              <li key={action}>{action}</li>
-            ))}
-          </ul>
-        </div>
-      </div>
-
-      <div className="panel timeline-panel">
-        <div className="panel-header">
-          <h3>Timeline and review history</h3>
-        </div>
-        <div className="timeline-list">
-          {incident.timeline.map((event) => (
-            <div key={event.label} className="timeline-item">
-              <span className="timeline-dot" />
-              <div>
-                <strong>{event.label}</strong>
-                <small>{event.value}</small>
-                <p>{event.detail}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-        <p className="muted-note">{incident.reviewHistory}</p>
-      </div>
-    </div>
-  );
-}
-
-function CountryAssessmentPanel() {
-  return (
-    <div className="module-view">
-      <div className="module-header">
-        <div>
-          <div className="eyebrow">Country assessments</div>
-          <h2>Regional risk evaluation</h2>
-        </div>
-        <button className="outline-button">Create assessment</button>
-      </div>
-
-      <div className="country-grid">
-        {countryAssessmentDetails.map((item) => (
-          <div key={item.country} className="panel country-card">
-            <div className="panel-header">
-              <h3>{item.country}</h3>
-              <span className={`badge ${severityTone[item.risk as keyof typeof severityTone]}`}>{item.risk}</span>
-            </div>
-
-            <div className="score-ring">
-              <div>
-                <strong>{item.score}</strong>
-                <span>Risk score</span>
-              </div>
-            </div>
-
-            <div className="risk-row">
-              <span className="meta-label">Trend</span>
-              <strong>{item.trend}</strong>
-            </div>
-            <div className="risk-row">
-              <span className="meta-label">Confidence</span>
-              <strong>{item.confidence}</strong>
-            </div>
-
-            <p>{item.summary}</p>
-
-            {item.sections.map((section) => (
-              <div key={section.heading} className="inline-section">
-                <h4>{section.heading}</h4>
-                <p>{section.text}</p>
-              </div>
-            ))}
-
-            <div className="tag-list">
-              {item.indicators.map((indicator) => (
-                <span key={indicator} className="chip">{indicator}</span>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+      {dialog && <IncidentLinkDialog articleIds={dialog.ids} initialMode={dialog.mode} onClose={() => setDialog(null)} onNavigate={onNavigate} />}
+      {countryDialog && (
+        <AddToCountryDialog
+          onClose={() => setCountryDialog(null)}
+          onNavigate={onNavigate}
+          report={{
+            articleId: countryDialog.id,
+            headline: countryDialog.headline,
+            countries: countryDialog.countries.filter((country) => country.code !== GLOBAL_CODE && country.code !== UNKNOWN_CODE),
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1726,7 +1275,7 @@ function SourcesPanel() {
 
   useEffect(() => {
     void loadSources();
-    const events = new EventSource('/api/events');
+    const events = openSharedEvents();
     let refreshTimer: number | undefined;
     const refreshAfterSync = () => {
       if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
@@ -1902,6 +1451,11 @@ function SourcesPanel() {
 
 function App() {
   const [activeView, setActiveView] = useState<(typeof navItems)[number]>('Overview');
+  const [focusId, setFocusId] = useState<string | undefined>(undefined);
+  const navigate: Navigate = useCallback((view, id) => {
+    setActiveView(view);
+    setFocusId(id);
+  }, []);
   const feed = usePublicFeed();
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {
@@ -1928,7 +1482,7 @@ function App() {
               <li
                 key={item}
                 className={activeView === item ? 'active' : ''}
-                onClick={() => setActiveView(item)}
+                onClick={() => { setActiveView(item); setFocusId(undefined); }}
               >
                 {item}
               </li>
@@ -1950,16 +1504,17 @@ function App() {
           <div className="header-actions">
             <div className="search-box">Search incidents, sources, countries…</div>
             <div className={`status-pill ${feedLive ? 'success' : 'neutral'}`}>{feedLive ? 'Public feeds live' : 'Public feeds connecting'}</div>
-            <div className="avatar">AM</div>
+            <AlertsBell onNavigate={navigate} />
+            <AnalystMenu />
             <div className="theme-toggle">☾</div>
           </div>
         </header>
 
         {activeView === 'Overview' && <OverviewPanel feed={feed} />}
-        {activeView === 'Intelligence Feed' && <IntelligenceFeedPanel feed={feed} />}
-        {activeView === 'Threat Indicators' && <ThreatIndicatorsPanel />}
-        {activeView === 'Incidents' && <IncidentDetailPanel />}
-        {activeView === 'Country Assessments' && <CountryAssessmentPanel />}
+        {activeView === 'Intelligence Feed' && <IntelligenceFeedPanel feed={feed} onNavigate={navigate} />}
+        {activeView === 'Threat Indicators' && <IndicatorsModule focusId={focusId} onNavigate={navigate} />}
+        {activeView === 'Incidents' && <IncidentsModule focusId={focusId} onNavigate={navigate} />}
+        {activeView === 'Country Assessments' && <CountriesModule focusId={focusId} onNavigate={navigate} />}
         {activeView === 'SIBs' && <SIBBuilderPanel />}
         {activeView === 'Watchlists' && <WatchlistPanel />}
         {activeView === 'Sources' && <SourcesPanel />}
