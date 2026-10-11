@@ -96,3 +96,16 @@ The **Map** page is an interactive geographic workspace. Everything on it is rea
 **Aircraft.** Only the visible area is queried (movement is debounced), responses are cached and shared between browsers, polling stops when the layer is off or the tab is hidden, and positions fade after 30 s and are removed after 120 s (these thresholds are this app's, not the provider's). Coverage is provider-dependent; a missing aircraft does not mean anything is wrong. Callsign, altitude, speed, heading and similar fields are shown only when supplied, and no airline or route is inferred.
 
 **Saved places and alerts.** Save a location, a radius or a bounding box (kept on the server, per browser). Optional in-app alerts cover new events with provider or analyst coordinates inside the place, filtered by minimum severity and category, deduplicated per place and event, with a cooldown, and never back-filled. They are labelled "geographic match, not confirmed business impact". On Render's free plan the database is lost on redeploy unless a persistent disk is attached.
+
+## Security information bulletins (SIBs)
+
+A bulletin is always created from a real record: an incident (**New bulletin** on the SIBs page or **Create SIB** on an incident) or a saved country assessment. The record's content is copied in as an editable starting point:
+
+- **From an incident:** title, severity, location, summary, linked reports (as the source list), operational and business impacts, assets and open actions. *Impact on employees* is left empty because incidents do not record it.
+- **From a country assessment:** the summary, each rated category with its rationale, and the evidence. The pre-filled severity maps the highest category rating (Severe → Critical, High → High, Elevated → Medium, Moderate and Low → Low); change it if you disagree.
+
+Rules: a draft needs a title, a severity other than Unassessed, a location, an executive summary, at least one recommended action and at least one source report before it can be approved. Approved bulletins are locked; **Reopen as draft** removes the approval and the revision number increases on the next approval. If the source incident or assessment changes after drafting, the page says so and offers to replace the source reports (your text is never overwritten). Every create, edit, approval and reopening is kept in an audit trail.
+
+There are no user accounts. The approver is the analyst name set in the browser (top-right circle); approval is refused without one. It records who approved but does not verify identity. Bulletins are private to the browser that created them, like incidents.
+
+Exports use one document model, so they match the preview: **PDF (print)** opens the browser print dialog (choose *Save as PDF*), **Word (.doc)** is an HTML document Word opens and edits, **HTML**, **Email** (a shortened text version in your mail program) and **Copy text**. Drafts are marked "not approved" in every export. Classification choices are Public, Internal, Internal / Restricted and Confidential.
