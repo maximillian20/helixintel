@@ -51,8 +51,6 @@ const navItems = [
   'Threat Indicators',
   'Market Impact',
   'SIBs',
-  'Human Rights',
-  'Political Risk',
   'Map',
   'Watchlists',
   'Reports',
