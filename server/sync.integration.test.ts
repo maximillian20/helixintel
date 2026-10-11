@@ -43,7 +43,7 @@ test('scheduled source sync persists records, deduplicates, records corrections,
 
     const address = server.address();
     assert.ok(address && typeof address !== 'string');
-    const response = await fetch(`http://127.0.0.1:${address.port}/api/feed/public`);
+    const response = await originalFetch(`http://127.0.0.1:${address.port}/api/feed/public`);
     const body = await response.json() as { items: Array<{ headline: string; source: string }>; sources: Array<{ status: string }> };
     assert.equal(response.status, 200);
     assert.equal(body.items.length, 2);
