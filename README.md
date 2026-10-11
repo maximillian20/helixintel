@@ -52,3 +52,20 @@ These three screens use only stored public-source records and what you enter you
 - **Threat indicators**: four indicators calculated from GDACS, CISA KEV and the news sources, compared with the previous eight complete weeks. History starts when the app first reads a source, so most indicators show "Insufficient history" for the first weeks (CISA KEV and GDACS backfill sooner).
 - **Privacy**: there are no user accounts. Incidents, assessments, watchlists and alerts are private to the browser that created them, and the server enforces this on every request.
 - **Persistence**: data is stored in the SQLite file (`SOURCE_DB_PATH`). On Render's free tier the file is reset on each redeploy unless a persistent disk is attached.
+
+## Market impact and correlations
+
+The **Market Impact** screen connects events (de-duplicated reports and your incidents) with stocks, indices and crypto-assets. It shows only real stored prices; with no provider data it says so and invents nothing.
+
+| Prices | Needs | Notes |
+| --- | --- | --- |
+| Crypto (BTC, ETH, SOL, XRP, ADA, DOGE, LTC, LINK; hourly and daily) | nothing | Coinbase Exchange public candles, USD pairs. Display terms for a public site are not confirmed. |
+| US stocks and ETFs (daily, split/dividend adjusted) | `TIINGO_API_TOKEN` | Tiingo's free plan is for internal, non-commercial use. A public site needs a Tiingo commercial licence. Free limits are about 50 requests/hour and 1,000/day; the app spaces requests. |
+| S&P 500, Nasdaq Composite, Dow Jones, Brent, WTI (daily) | `FRED_API_KEY` | FRED terms and the third-party limits on index series were not verified; check them before public use. |
+
+- Without a key the affected assets show **Setup required**; failed refreshes show **Stale** (last stored prices kept) or **Unavailable**; end-of-day data is labelled **Delayed**. Listings with no free source (London, Taiwan, Amsterdam shares) are listed as **Unsupported** so they cannot be confused with the US-listed ADRs.
+- Fetching runs in the background every minute, only for watched assets, assets with confirmed links and their benchmarks, incrementally, with per-provider spacing and exponential backoff. A changed Tiingo adjusted history triggers a full refetch. Set `MARKET_SYNC_DISABLED=1` to stop fetching.
+- **Method**: anchor = earliest public report; reference = last completed bar close at or before it; measured = completed bar nearest to anchor + 1h/24h/7d, and a window is *Pending* until a bar at or after its end exists. Stocks and indices have daily data only, so their 1h window is *Unsupported*. "Benchmark-adjusted return" is asset minus benchmark over the same two bar times. NYSE holidays and early closes are computed from the published rules; ad hoc closures are not modelled.
+- **Links** come from named entities, sector keywords and country exposure rules, each with its explanation. You can confirm, reject or add links; suggestions and your decisions are stored separately.
+- **Associations and correlations** use only classifications frozen when the app first saw an event, so history accumulates from deployment and shows *Insufficient history* until enough distinct, non-overlapping events exist. Results are labelled *Preliminary association* or *Historically observed association* (n of at least 20 and a Holm-corrected sign test below 0.05). Correlation needs 60 aligned days and 10 event days.
+- Alerts (watchlist tab) are optional, deduplicated per event and asset, and suppressed during a per-asset cooldown. Nothing here is advice or a forecast.
