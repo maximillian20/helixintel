@@ -252,28 +252,6 @@ export const countryAssessmentDetails = [
   }
 ];
 
-export const sibDraft = {
-  title: 'Maritime activity in the Red Sea corridor',
-  classification: 'Internal / Restricted',
-  severity: 'Alert',
-  location: 'Red Sea / Bab el-Mandeb',
-  summary: 'The available information indicates elevated maritime and security activity in the Red Sea corridor. The situation remains subject to change as confirmation is still being collected.',
-  currentSituation: 'Commercial shipping operators report rerouting, increased escort activity and elevated monitoring in key transit corridors.',
-  actors: 'Commercial vessels, regional security forces, maritime escort operators and third-party monitoring entities.',
-  sources: 'Reuters, commercial shipping advisories, vessel operators and public notice channels.',
-  confidence: 'Medium',
-  impactOnEmployees: 'Personnel involved in transit planning and regional travel should be monitored for travel and duty-of-care exposure.',
-  impactOnAssets: 'Port and route planning for critical logistics facilities remains exposed to delays and rerouting costs.',
-  impactOnOperations: 'Operational service continuity may be affected by transport delays and insurance review triggers.',
-  recommendedActions: [
-    'Review travel and exposure protocols for staff in affected corridors.',
-    'Assess port and service-provider continuity plans.',
-    'Prepare escalation-ready communications for critical commercial partners.'
-  ],
-  nextReview: '2026-10-08T12:00:00Z',
-  approver: 'A. Malik'
-};
-
 export const watchlists = [
   {
     name: 'Red Sea corridor',
