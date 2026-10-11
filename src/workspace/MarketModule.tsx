@@ -221,10 +221,18 @@ function EventViewTab({ focusKey, onChart }: { focusKey: string | null; onChart:
   useEffect(() => { if (focusKey) setSelected({ key: focusKey }); }, [focusKey, setSelected]);
   const view = useMarketData<EventView>(selected.key ? `/event?key=${encodeURIComponent(selected.key)}` : null);
   const [adding, setAdding] = useState(false);
+  useEffect(() => {
+    if (!selected.key && !focusKey && list.data && list.data.items.length > 0) setSelected({ key: list.data.items[0].key });
+  }, [selected.key, focusKey, list.data, setSelected]);
   const patch = (change: Partial<typeof filters>) => setFilters((current) => ({ ...current, ...change }));
   const detail = view.data && view.data.event.key === selected.key ? view.data : null;
   const linked = new Set(detail?.assets.map((a) => a.asset.id) ?? []);
 
+  const untracked = detail ? detail.assets.filter((a) => a.link.status !== 'rejected' && !a.asset.watched && a.asset.status.status !== 'unsupported') : [];
+  const trackAll = async () => {
+    for (const a of untracked) await marketFetch('POST', '/watchlist', { assetId: a.asset.id });
+    await view.reload();
+  };
   const addLink = async (asset: AssetWithStatus) => {
     await marketFetch('PUT', '/event/link', { key: selected.key, assetId: asset.id, status: 'confirmed' });
     setAdding(false);
@@ -279,7 +287,11 @@ function EventViewTab({ focusKey, onChart }: { focusKey: string | null; onChart:
               {detail.sessionNotes.map((n) => <p key={n.calendar} className="market-session"><small><strong>{n.calendar === 'XNYS' ? 'US exchanges' : n.calendar === '24x7' ? 'Crypto (24/7)' : 'Daily spot prices'}:</strong> {n.note}</small></p>)}
               <Notice>Price changes shown after a report are observations. They are not evidence that the report caused them, and they are not forecasts or advice.</Notice>
             </div>
-            <div className="ws-form-actions"><button className="ghost-button" onClick={() => setAdding(!adding)} aria-expanded={adding}>Link another asset</button></div>
+            <div className="ws-form-actions">
+              <button className="ghost-button" onClick={() => setAdding(!adding)} aria-expanded={adding}>Link another asset</button>
+              {untracked.length > 0 && <button className="ghost-button" onClick={() => void trackAll()}>Track all {untracked.length} suggested assets (fetch their prices)</button>}
+            </div>
+            {untracked.length > 0 && <Notice>Prices are only fetched for tracked assets. Until you track them, reactions show "No data". Stocks and indices also need their free API keys on the server.</Notice>}
             {adding && <div className="panel"><AssetPicker label="Link" filterOut={linked} onPick={(asset) => void addLink(asset)} /></div>}
             {detail.assets.length === 0 && <Notice>No assets are linked to this event yet.</Notice>}
             {detail.assets.map((item) => <AssetCard key={item.asset.id} item={item} eventKey={selected.key} onChanged={() => void view.reload()} onChart={onChart} />)}
