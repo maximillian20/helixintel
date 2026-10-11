@@ -2085,3 +2085,52 @@ button.avatar { border: 1px solid var(--border); color: var(--text); cursor: poi
   .brief a { color: #000; }
   .no-print { display: none !important; }
 }
+
+/* ---- Market impact ---- */
+.market-split { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 960px) { .market-split { grid-template-columns: 1fr; } }
+.market-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.market-filters input[type='search'], .market-filters input[type='date'], .market-picker input { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+.market-events { display: grid; gap: 10px; max-height: 80vh; overflow-y: auto; }
+.market-event-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.market-event { width: 100%; display: grid; gap: 3px; text-align: left; padding: 10px; border-radius: 10px; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; font: inherit; }
+.market-event small { color: var(--muted); }
+.market-event.selected, .market-event:hover { border-color: var(--primary); background: rgba(125, 211, 252, 0.06); }
+.market-detail, .market-asset-view, .market-watch, .market-assoc, .market-method { display: grid; gap: 12px; min-width: 0; }
+.market-facts { display: grid; grid-template-columns: minmax(130px, 200px) 1fr; gap: 6px 14px; margin: 0; }
+.market-facts dt { color: var(--muted); font-size: 0.82rem; }
+.market-facts dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .market-facts { grid-template-columns: 1fr; } }
+.market-asset { display: grid; gap: 8px; }
+.market-asset.rejected { opacity: 0.6; }
+.market-asset-head { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; }
+.market-asset-head h4 { margin: 0; }
+.market-asset-head small { color: var(--muted); }
+.market-asset-badges, .market-row-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.market-basis, .market-session { margin: 0; }
+.market-reactions { width: 100%; border-collapse: collapse; font-size: 0.86rem; display: block; overflow-x: auto; }
+.market-reactions th, .market-reactions td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.market-reactions thead th { color: var(--muted); font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.market-reactions small { display: block; color: var(--muted); }
+.move.up { color: #4ade80; } .move.down { color: #f87171; } .move.flat, .move.none { color: var(--text); }
+.market-chart svg { width: 100%; height: auto; overflow: visible; }
+.market-chart .price-line { fill: none; stroke: #7dd3fc; stroke-width: 1.6; }
+.market-chart .marker { cursor: pointer; outline: none; }
+.market-chart .marker-line { stroke: rgba(148, 163, 184, 0.35); stroke-dasharray: 3 3; }
+.market-chart .marker.suggested .marker-line { stroke-dasharray: 2 4; }
+.market-chart .marker-dot { stroke: #0b1220; stroke-width: 2; fill: #94a3b8; }
+.market-chart .marker-dot.sev-critical { fill: #ef4444; } .market-chart .marker-dot.sev-high { fill: #f97316; }
+.market-chart .marker-dot.sev-medium { fill: #f59e0b; } .market-chart .marker-dot.sev-low { fill: #38bdf8; }
+.market-chart .marker.selected .marker-dot, .market-chart .marker:focus .marker-dot { stroke: #fff; }
+.market-chart .marker.confirmed .marker-line { stroke: #4ade80; stroke-dasharray: none; }
+.market-chart-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); gap: 12px; align-items: start; }
+@media (max-width: 960px) { .market-chart-grid { grid-template-columns: 1fr; } }
+.market-chart-head { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; }
+.market-watch-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.market-results { max-height: 320px; overflow-y: auto; }
+.market-assoc-row, .market-provider, .market-corr { display: grid; gap: 4px; }
+.market-corr { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.market-corr small, .market-provider small { color: var(--muted); display: block; overflow-wrap: anywhere; }
+.market-provider { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.market-chart .marker-hit { stroke: transparent; stroke-width: 14; pointer-events: stroke; }
+.ws-tabs { flex-wrap: wrap; }

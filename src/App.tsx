@@ -8,6 +8,7 @@ import { AlertsBell, AnalystMenu } from './workspace/AlertsBell.tsx';
 import { AddToCountryDialog, CountriesModule } from './workspace/CountriesModule.tsx';
 import { IncidentLinkDialog, IncidentsModule } from './workspace/IncidentsModule.tsx';
 import { IndicatorsModule } from './workspace/IndicatorsModule.tsx';
+import { MarketModule } from './workspace/MarketModule.tsx';
 import type { Navigate } from './workspace/shared.tsx';
 import { findPlaces, type Place } from './data/geo.ts';
 import {
@@ -46,6 +47,7 @@ const navItems = [
   'Incidents',
   'Country Assessments',
   'Threat Indicators',
+  'Market Impact',
   'SIBs',
   'Human Rights',
   'Political Risk',
@@ -1063,6 +1065,7 @@ function IntelligenceFeedPanel({ feed, onNavigate }: { feed: PublicFeedState; on
               <button className="outline-button" onClick={() => setDialog({ ids: [selectedItem.id], mode: 'create' })}>Create incident</button>
               <button className="outline-button" onClick={() => setDialog({ ids: [selectedItem.id], mode: 'existing' })}>Add to existing incident</button>
               <button className="ghost-button" onClick={() => setCountryDialog(selectedItem)}>Add to country assessment</button>
+              <button className="ghost-button" onClick={() => onNavigate('Market Impact', `report:${selectedItem.id}`)}>View market impact</button>
             </div>
             <a className="source-link" href={selectedItem.url} target="_blank" rel="noreferrer">Open publisher article</a>
             {selectedItem.sourceUrl && <a className="source-link" href={selectedItem.sourceUrl} target="_blank" rel="noreferrer">View publisher feed</a>}
@@ -1513,6 +1516,7 @@ function App() {
         {activeView === 'Overview' && <OverviewPanel feed={feed} />}
         {activeView === 'Intelligence Feed' && <IntelligenceFeedPanel feed={feed} onNavigate={navigate} />}
         {activeView === 'Threat Indicators' && <IndicatorsModule focusId={focusId} onNavigate={navigate} />}
+        {activeView === 'Market Impact' && <MarketModule focusId={focusId} onNavigate={navigate} />}
         {activeView === 'Incidents' && <IncidentsModule focusId={focusId} onNavigate={navigate} />}
         {activeView === 'Country Assessments' && <CountriesModule focusId={focusId} onNavigate={navigate} />}
         {activeView === 'SIBs' && <SIBBuilderPanel />}
