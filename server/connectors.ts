@@ -33,6 +33,8 @@ type HttpOptions = {
   body?: string;
   timeoutMs?: number;
   attempts?: number;
+  /** Response size cap in bytes (default 2 MB, the feed limit). */
+  maxBytes?: number;
 };
 
 /** One request with a timeout and bounded exponential backoff on network errors, 429 and 5xx. */
@@ -61,7 +63,7 @@ export async function httpText(url: string, options: HttpOptions & { checkpoint?
         }
         throw new SourceFetchError(`Source returned HTTP ${response.status}`, retryAfterMs);
       }
-      return { notModified: false as const, text: await readBoundedBody(response), etag, lastModified };
+      return { notModified: false as const, text: await readBoundedBody(response, options.maxBytes), etag, lastModified };
     } catch (error) {
       if (error instanceof SourceFetchError) throw error;
       if (attempt === attempts - 1) throw new SourceFetchError(error instanceof Error ? error.message : 'Source request failed.');

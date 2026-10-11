@@ -109,10 +109,10 @@ export function parseRssArticles(xml: string, source: SourceDefinition): Normali
   });
 }
 
-export async function readBoundedBody(response: Response) {
+export async function readBoundedBody(response: Response, maxBytes = maxFeedBytes) {
   const declaredLength = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > maxFeedBytes) {
-    throw new SourceFetchError('Feed exceeds the 2 MB size limit.');
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new SourceFetchError(`Feed exceeds the ${Math.round(maxBytes / 1048576)} MB size limit.`);
   }
   if (!response.body) return '';
 
@@ -123,9 +123,9 @@ export async function readBoundedBody(response: Response) {
     const result = await reader.read();
     if (result.done) break;
     totalBytes += result.value.byteLength;
-    if (totalBytes > maxFeedBytes) {
+    if (totalBytes > maxBytes) {
       await reader.cancel();
-      throw new SourceFetchError('Feed exceeds the 2 MB size limit.');
+      throw new SourceFetchError(`Feed exceeds the ${Math.round(maxBytes / 1048576)} MB size limit.`);
     }
     chunks.push(result.value);
   }

@@ -250,7 +250,7 @@ export async function syncGeoSource(deps: GeoSyncDeps, source: GeoSource, force 
     ? usgsUrl(usgsFeedLevel(deps.env), usgsFeedPeriod(state.lastSuccessAt, now.getTime()))
     : `https://eonet.gsfc.nasa.gov/api/v3/events?status=all&days=${state.lastSuccessAt && now.getTime() - Date.parse(state.lastSuccessAt) < 5 * 86_400_000 ? 7 : 30}&limit=1000`;
   try {
-    const response = await httpText(url, { fetcher: deps.fetcher, attempts: 2 });
+    const response = await httpText(url, { fetcher: deps.fetcher, attempts: 2, maxBytes: 20 * 1024 * 1024, timeoutMs: 45_000 });
     if (response.notModified) throw new Error('Unexpected 304 response.');
     const events = source === 'usgs' ? parseUsgs(response.text) : parseEonet(response.text);
     const at = now.toISOString();
