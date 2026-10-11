@@ -20,13 +20,17 @@ import {
   countryName,
   sortedCountries,
 } from './data/countries.ts';
-import { fetchFeedPage, saveItemState, type ItemStateChange } from './data/feedApi.ts';
+import { fetchFeedPage, fetchOverview, saveItemState, type ItemStateChange, type OverviewPayload } from './data/feedApi.ts';
+import { groupForMap, type MapGroup } from './data/mapGroups.ts';
 import {
   DEFAULT_FEED_FILTERS,
   SEVERITIES,
   hasActiveFilters,
   matchesFilters,
   type ConfidenceLevel,
+  ASSESSMENT_METHOD_LABELS,
+  SEVERITY_COLORS,
+  SEVERITY_RANK,
   type FeedFilters,
   type FeedItemDto,
   type FeedPage,
@@ -89,7 +93,9 @@ type SourceRegistryItem = {
   cadence: string;
   attribution: string;
   termsUrl: string;
-  status: 'healthy' | 'stale' | 'unavailable' | 'not_checked';
+  status: 'healthy' | 'stale' | 'unavailable' | 'not_checked' | 'setup_required';
+  kind?: string;
+  setup?: { required: boolean; envVars: string[]; instructions: string; signupUrl: string } | null;
   itemCount: number;
   lastAttemptAt: string | null;
   lastSuccessAt: string | null;
@@ -180,11 +186,82 @@ function usePublicFeed() {
 
 type PublicFeedState = ReturnType<typeof usePublicFeed>;
 
+/** Overview headlines and map use the same report model (severity, countries, location) as the Intelligence Feed. */
+function useOverviewItems() {
+  const [data, setData] = useState<OverviewPayload | null>(null);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      setData(await fetchOverview());
+      setError('');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not load reports.');
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    const events = new EventSource('/api/events');
+    let timer: number | undefined;
+    const reloadSoon = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void load(), 250);
+    };
+    events.addEventListener('public-feed-updated', reloadSoon);
+    events.addEventListener('source-sync-updated', reloadSoon);
+    const interval = window.setInterval(() => void load(), 60_000);
+    return () => {
+      events.close();
+      window.clearInterval(interval);
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [load]);
+
+  return { data, error };
+}
+
+function SeverityMarkerPopup({ group, now }: { group: MapGroup; now: number }) {
+  const breakdown = SEVERITIES.filter((severity) => group.counts[severity] > 0);
+  return (
+    <div className="risk-popup severity-popup">
+      <strong>{group.label}</strong>
+      <p>
+        {group.items.length} report{group.items.length === 1 ? '' : 's'}
+        {' · '}
+        {breakdown.map((severity) => (
+          <span key={severity} className="severity-count">
+            <i style={{ background: SEVERITY_COLORS[severity] }} />{group.counts[severity]} {severity}
+          </span>
+        ))}
+      </p>
+      {group.precision === 'approximate' && (
+        <p className="approx-note">Approximate: placed at the centre of the country, not at the event itself.</p>
+      )}
+      <div className="severity-popup-list">
+        {group.items.map((item) => (
+          <div key={item.id} className="severity-popup-item">
+            <div className="severity-popup-top">
+              <SeverityBadge severity={item.severity} manual={item.severityOverridden} />
+              <small title={formatIsoDate(item.publishedAt)}>{relativeTime(item.publishedAt, now)}</small>
+            </div>
+            <a href={item.url} target="_blank" rel="noopener noreferrer">{item.headline}</a>
+            <small className="severity-popup-reason">{item.severityRationale.slice(0, 220)}{item.severityRationale.length > 220 ? '…' : ''}</small>
+            <small>{item.source} · published {formatIsoDate(item.publishedAt)} · {ASSESSMENT_METHOD_LABELS[item.assessmentMethod]}</small>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 type PlaceMention = { place: Place; items: PublicFeedPayload['items'] };
 
 function OverviewPanel({ feed }: { feed: PublicFeedState }) {
   const mapRef = useRef<LeafletMap>(null);
-  const [mapFilter, setMapFilter] = useState('All mentioned');
+  const [mapFilter, setMapFilter] = useState('All locations');
+  const [mapSeverity, setMapSeverity] = useState<'All' | Severity>('All');
+  const overview = useOverviewItems();
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -194,6 +271,8 @@ function OverviewPanel({ feed }: { feed: PublicFeedState }) {
 
   const items = useMemo(() => feed.payload?.items ?? [], [feed.payload]);
   const sources = useMemo(() => feed.payload?.sources ?? [], [feed.payload]);
+  const activeSources = sources.filter((source) => source.status !== 'setup_required');
+  const setupCount = sources.length - activeSources.length;
   const healthyCount = sources.filter((source) => source.status === 'healthy').length;
   const pollMinutes = sources[0] ? Math.round(sources[0].pollIntervalMs / 60000) : null;
   const dayMs = 24 * 60 * 60 * 1000;
@@ -225,14 +304,21 @@ function OverviewPanel({ feed }: { feed: PublicFeedState }) {
     }
     return [...byPlace.values()].sort((a, b) => b.items.length - a.items.length);
   }, [items]);
-  const visibleMentions = mapFilter === 'Top 10' ? mentions.slice(0, 10) : mentions;
-  const maxMentions = Math.max(1, ...mentions.map((entry) => entry.items.length));
-  const latest = [...items]
+  const overviewItems = useMemo(() => overview.data?.items ?? [], [overview.data]);
+  const mapData = useMemo(() => groupForMap(overviewItems, mapSeverity), [overviewItems, mapSeverity]);
+  const visibleGroups = mapFilter === 'Top 10' ? mapData.groups.slice(0, 10) : mapData.groups;
+  const maxGroupSize = Math.max(1, ...mapData.groups.map((group) => group.items.length));
+  const legendCounts = useMemo(() => {
+    const counts = { Critical: 0, High: 0, Medium: 0, Low: 0, Unassessed: 0 } as Record<Severity, number>;
+    for (const group of mapData.groups) for (const severity of SEVERITIES) counts[severity] += group.counts[severity];
+    return counts;
+  }, [mapData.groups]);
+  const latest = [...overviewItems]
     .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
     .slice(0, 6);
 
   const hasData = items.length > 0;
-  const feedHealthy = sources.length > 0 && healthyCount === sources.length;
+  const feedHealthy = activeSources.length > 0 && healthyCount === activeSources.length;
 
   return (
     <>
@@ -249,7 +335,7 @@ function OverviewPanel({ feed }: { feed: PublicFeedState }) {
         </div>
         <div>
           <span className="meta-label">Public sources</span>
-          <strong>{sources.length > 0 ? `${healthyCount} of ${sources.length} healthy` : 'Not checked'}</strong>
+          <strong>{sources.length > 0 ? `${healthyCount} of ${activeSources.length} healthy${setupCount > 0 ? ` · ${setupCount} need setup` : ''}` : 'Not checked'}</strong>
         </div>
         <div>
           <span className="meta-label">System mode</span>
@@ -282,12 +368,12 @@ function OverviewPanel({ feed }: { feed: PublicFeedState }) {
           <strong>{last24h}</strong>
         </article>
         <article className="metric-card neutral">
-          <div className="metric-header"><span>Places named in headlines</span><span className="metric-trend">keyword match</span></div>
-          <strong>{mentions.length}</strong>
+          <div className="metric-header"><span>Reports on map</span><span className="metric-trend">supported location</span></div>
+          <strong>{overview.data ? mapData.locatedCount : '–'}</strong>
         </article>
         <article className={`metric-card ${feedHealthy ? 'positive' : 'warning'}`}>
           <div className="metric-header"><span>Sources healthy</span><span className="metric-trend">connector status</span></div>
-          <strong>{healthyCount}/{sources.length}</strong>
+          <strong>{healthyCount}/{activeSources.length}</strong>
         </article>
       </section>
 
@@ -296,14 +382,21 @@ function OverviewPanel({ feed }: { feed: PublicFeedState }) {
           <div className="panel-header map-panel-header">
             <div>
               <h3>Global news map</h3>
-              <span className="map-subtitle">Places named in current public headlines / LIVE</span>
+              <span className="map-subtitle">Reports with a supported event location, coloured by severity / LIVE</span>
             </div>
             <div className="map-toolbar">
               <label className="map-filter-control">
-                <span className="sr-only">Filter map</span>
-                <select value={mapFilter} onChange={(event) => setMapFilter(event.target.value)}>
-                  <option>All mentioned</option>
+                <span className="sr-only">Filter map locations</span>
+                <select aria-label="Map locations" value={mapFilter} onChange={(event) => setMapFilter(event.target.value)}>
+                  <option>All locations</option>
                   <option>Top 10</option>
+                </select>
+              </label>
+              <label className="map-filter-control">
+                <span className="sr-only">Filter map by severity</span>
+                <select aria-label="Map severity" value={mapSeverity} onChange={(event) => setMapSeverity(event.target.value as 'All' | Severity)}>
+                  <option value="All">All severities</option>
+                  {SEVERITIES.map((severity) => <option key={severity} value={severity}>{severity}</option>)}
                 </select>
               </label>
               <button className="ghost-button" onClick={() => mapRef.current?.setView([25, 35], 2)}>
@@ -335,36 +428,53 @@ function OverviewPanel({ feed }: { feed: PublicFeedState }) {
                   />
                 </LayersControl.BaseLayer>
               </LayersControl>
-              {visibleMentions.map((entry) => (
+              {visibleGroups.map((group) => (
                 <CircleMarker
-                  key={entry.place.name}
-                  center={[entry.place.lat, entry.place.lng]}
-                  radius={5 + 14 * Math.sqrt(entry.items.length / maxMentions)}
-                  pathOptions={{ color: '#e2e8f0', weight: 1.5, fillColor: '#38bdf8', fillOpacity: 0.65 }}
+                  key={group.key}
+                  center={[group.lat, group.lng]}
+                  radius={5 + 14 * Math.sqrt(group.items.length / maxGroupSize)}
+                  pathOptions={{
+                    color: '#e2e8f0',
+                    weight: 1.5,
+                    dashArray: group.precision === 'approximate' ? '4 3' : undefined,
+                    fillColor: SEVERITY_COLORS[group.severity],
+                    fillOpacity: 0.8,
+                  }}
                 >
-                  <Tooltip direction="top">{entry.place.name}: {entry.items.length} article{entry.items.length === 1 ? '' : 's'}</Tooltip>
-                  <Popup>
-                    <div className="risk-popup">
-                      <strong>{entry.place.name}</strong>
-                      <p>{entry.items.length} article{entry.items.length === 1 ? '' : 's'} name this place.</p>
-                      {entry.items.slice(0, 3).map((item) => (
-                        <p key={item.id}>
-                          <a href={item.url} target="_blank" rel="noopener noreferrer">{item.headline}</a>
-                          <br /><small>{item.source}</small>
-                        </p>
-                      ))}
-                    </div>
+                  <Tooltip direction="top">
+                    {group.label}: {group.items.length} report{group.items.length === 1 ? '' : 's'}, highest severity {group.severity}
+                  </Tooltip>
+                  <Popup maxWidth={380} minWidth={280}>
+                    <SeverityMarkerPopup group={group} now={now} />
                   </Popup>
                 </CircleMarker>
               ))}
             </MapContainer>
-            <div className="map-legend">
-              <span><i className="monitoring-dot" />Marker size = number of articles</span>
-            </div>
+          </div>
+          <div className="map-legend" aria-label="Map legend">
+            <strong>Report severity</strong>
+            {SEVERITIES.map((severity) => (
+              <span key={severity} className="legend-item">
+                <i className="legend-dot" style={{ background: SEVERITY_COLORS[severity] }} />
+                {severity} <small>({legendCounts[severity]})</small>
+              </span>
+            ))}
+            <span className="legend-note">Size = number of reports</span>
           </div>
           <div className="map-footer">
-            <span>{visibleMentions.length} of {mentions.length} places shown</span>
-            <span>Place names are matched by keyword; this is not a risk rating. Select a marker for headlines.</span>
+            <span>
+              {overview.error
+                ? `Could not load map data: ${overview.error}`
+                : !overview.data
+                  ? 'Loading reports…'
+                  : `${visibleGroups.length} of ${mapData.groups.length} locations · ${mapData.locatedCount} of ${mapData.matching.length} matching reports on the map`}
+            </span>
+            <span data-testid="unlocated-count">
+              {mapData.unlocated.total} not shown (no supported location): {mapData.unlocated.global} global coverage, {mapData.unlocated.unknown} unknown location, {mapData.unlocated.multiple} several countries
+            </span>
+            <span className="map-explainer">
+              Marker colour is the highest severity among the reports at that location. It describes the reports, not a country risk rating. Dashed outlines are country-centre positions and are approximate.
+            </span>
           </div>
         </div>
 
@@ -373,12 +483,13 @@ function OverviewPanel({ feed }: { feed: PublicFeedState }) {
             <h3>Latest headlines</h3>
           </div>
           <div className="priority-list">
-            {latest.length === 0 && <p className="muted-note">No articles retrieved yet.</p>}
+            {latest.length === 0 && <p className="muted-note">{overview.error ? `Could not load headlines: ${overview.error}` : 'No articles retrieved yet.'}</p>}
             {latest.map((item) => (
               <div key={item.id} className="priority-item">
                 <div className="priority-row">
                   <span className="badge neutral">{item.source}</span>
-                  <span className="meta-label">{relativeTime(item.publishedAt, now)}</span>
+                  <SeverityBadge severity={item.severity} manual={item.severityOverridden} />
+                  <span className="meta-label" title={formatIsoDate(item.publishedAt)}>{relativeTime(item.publishedAt, now)}</span>
                 </div>
                 <strong>
                   <a href={item.url} target="_blank" rel="noopener noreferrer">{item.headline}</a>
@@ -386,7 +497,7 @@ function OverviewPanel({ feed }: { feed: PublicFeedState }) {
                 <p>{item.summary}</p>
                 <div className="detail-row">
                   <span>{item.attribution}</span>
-                  <span>Unassessed</span>
+                  <span>{ASSESSMENT_METHOD_LABELS[item.assessmentMethod]}</span>
                 </div>
               </div>
             ))}
@@ -495,7 +606,7 @@ const feedPageSize = 20;
 type ViewItem = FeedItemDto & {
   sourceType: string;
   reliability: string;
-  location?: string;
+  locationText?: string;
   region?: string;
   entities?: string;
   relevance?: string;
@@ -520,9 +631,10 @@ function toViewItem(item: FeedItemDto): ViewItem {
 const demoCountryCodes = new Map(countries.map((country) => [country.name, country.code]));
 
 function demoToViewItem(item: (typeof intelligenceFeed)[number], index: number): ViewItem {
+  const legacy: Record<string, Severity> = { Moderate: 'Medium', Watch: 'Low', Monitoring: 'Low' };
   const severity = (SEVERITIES as readonly string[]).includes(item.severity)
     ? item.severity as Severity
-    : item.severity === 'Monitoring' ? 'Watch' : 'Unassessed';
+    : legacy[item.severity] ?? 'Unassessed';
   const code = item.country === 'Global' ? GLOBAL_CODE : demoCountryCodes.get(item.country) ?? UNKNOWN_CODE;
   const confidence = ['High', 'Medium', 'Low'].includes(item.confidence) ? item.confidence as ConfidenceLevel : 'Not assessed';
   return {
@@ -538,6 +650,10 @@ function demoToViewItem(item: (typeof intelligenceFeed)[number], index: number):
     retrievedAt: item.date,
     lastCheckedAt: item.date,
     verificationStatus: 'demo',
+    sourceId: 'demo',
+    category: item.type,
+    location: null,
+    assessmentMethod: 'rules',
     severity,
     assessedSeverity: severity,
     severityOverridden: false,
@@ -556,7 +672,7 @@ function demoToViewItem(item: (typeof intelligenceFeed)[number], index: number):
     watchlistedAt: null,
     sourceType: item.sourceType,
     reliability: item.reliability,
-    location: item.location,
+    locationText: item.location,
     region: item.region,
     entities: item.entities,
     relevance: item.relevance,
@@ -811,6 +927,7 @@ function IntelligenceFeedPanel({ feed }: { feed: PublicFeedState }) {
             <p>{item.summary}</p>
             <div className="feed-result-meta">
               <span>{item.source}</span>
+              {item.category && <span>{item.category}</span>}
               <span>{countryText(item)}</span>
               <span>{item.reviewStatus}</span>
               {item.watchlisted && <span>On watchlist</span>}
@@ -1020,7 +1137,8 @@ function IntelligenceFeedPanel({ feed }: { feed: PublicFeedState }) {
               {!isDemo && <div><dt>Retrieved by app</dt><dd>{formatIsoDate(selectedItem.retrievedAt)}</dd></div>}
               {!isDemo && <div><dt>Source last checked</dt><dd>{formatIsoDate(selectedItem.lastCheckedAt)}</dd></div>}
               <div><dt>Countries</dt><dd>{selectedItem.countries.map((country) => country.name).join(', ')}</dd></div>
-              {selectedItem.location && <div><dt>Location</dt><dd>{selectedItem.location}</dd></div>}
+              {(selectedItem.location || selectedItem.locationText) && <div><dt>Location</dt><dd>{selectedItem.location?.label ?? selectedItem.locationText}</dd></div>}
+              {!isDemo && <div><dt>Assessment method</dt><dd>{ASSESSMENT_METHOD_LABELS[selectedItem.assessmentMethod]}</dd></div>}
               <div><dt>Category</dt><dd>{selectedItem.categoryLabels.length > 0 ? selectedItem.categoryLabels.join(', ') : 'None detected'}</dd></div>
               <div><dt>Reliability</dt><dd>{selectedItem.reliability}</dd></div>
               <div><dt>Assessment confidence</dt><dd>{selectedItem.assessmentConfidence}</dd></div>
@@ -1646,14 +1764,16 @@ function SourcesPanel() {
     || (statusFilter === 'Stale' && source.status === 'stale')
     || (statusFilter === 'Unavailable' && source.status === 'unavailable')
     || (statusFilter === 'Not checked' && source.status === 'not_checked')
+    || (statusFilter === 'Setup required' && source.status === 'setup_required')
   ));
   const selectedSource = filteredSources.find((source) => source.id === selectedId) ?? filteredSources[0];
   const healthyCount = sources.filter((source) => source.status === 'healthy').length;
   const staleCount = sources.filter((source) => source.status === 'stale').length;
   const unavailableCount = sources.filter((source) => source.status === 'unavailable').length;
+  const setupCount = sources.filter((source) => source.status === 'setup_required').length;
 
   function statusLabel(status: SourceRegistryItem['status']) {
-    return status === 'not_checked' ? 'Not checked' : status[0].toUpperCase() + status.slice(1);
+    return status === 'not_checked' ? 'Not checked' : status === 'setup_required' ? 'Setup required' : status[0].toUpperCase() + status.slice(1);
   }
 
   return (
@@ -1673,6 +1793,7 @@ function SourcesPanel() {
         <article><span>Healthy</span><strong>{healthyCount}</strong></article>
         <article><span>Stale</span><strong>{staleCount}</strong></article>
         <article><span>Unavailable</span><strong>{unavailableCount}</strong></article>
+        <article><span>Setup required</span><strong>{setupCount}</strong></article>
       </section>
 
       {error && <p className="source-registry-error" role="alert">{error}</p>}
@@ -1689,6 +1810,7 @@ function SourcesPanel() {
                 <option>Stale</option>
                 <option>Unavailable</option>
                 <option>Not checked</option>
+                <option>Setup required</option>
               </select>
             </label>
           </div>
@@ -1737,9 +1859,20 @@ function SourcesPanel() {
               <div><dt>Last checked</dt><dd>{selectedSource.lastCheckedAt ? formatIsoDate(selectedSource.lastCheckedAt) : 'Not checked yet'}</dd></div>
               <div><dt>Last success</dt><dd>{selectedSource.lastSuccessAt ? formatIsoDate(selectedSource.lastSuccessAt) : 'No successful check yet'}</dd></div>
               <div><dt>Next scheduled check</dt><dd>{selectedSource.nextRunAt ? formatIsoDate(selectedSource.nextRunAt) : 'Waiting for first check'}</dd></div>
-              <div><dt>Update mechanism</dt><dd>Conditional RSS polling / {Math.round(selectedSource.pollIntervalMs / 60000)} min</dd></div>
+              <div><dt>Update mechanism</dt><dd>Scheduled polling / every {selectedSource.pollIntervalMs >= 3_600_000 ? `${Math.round(selectedSource.pollIntervalMs / 3_600_000)} h` : `${Math.round(selectedSource.pollIntervalMs / 60000)} min`}</dd></div>
             </dl>
 
+            {selectedSource.status === 'setup_required' && selectedSource.setup && (
+              <div className="source-setup" role="note">
+                <strong>Setup required</strong>
+                <p>{selectedSource.setup.instructions}</p>
+                <p>Server setting{selectedSource.setup.envVars.length > 1 ? 's' : ''}: <code>{selectedSource.setup.envVars.join(', ')}</code> (kept on the server, never sent to the browser).</p>
+                <a href={selectedSource.setup.signupUrl} target="_blank" rel="noreferrer">Get free access</a>
+              </div>
+            )}
+            {selectedSource.status === 'stale' && selectedSource.lastSuccessAt && (
+              <p className="source-registry-error">Stale: showing reports retained from the last successful check ({formatIsoDate(selectedSource.lastSuccessAt)}).</p>
+            )}
             {selectedSource.lastError && <p className="source-registry-error">{selectedSource.lastError}</p>}
             <div className="source-detail-links">
               <a href={selectedSource.url} target="_blank" rel="noreferrer">Open feed endpoint</a>
@@ -1757,7 +1890,7 @@ function SourcesPanel() {
                 </article>
               ))}
             </div>
-            <p className="muted-note">This registry reports connector reachability, not source accuracy. Articles remain unassessed until reviewed and corroborated.</p>
+            <p className="muted-note">This registry reports connector reachability and freshness, not source accuracy. Severity labels are either provided by the source or estimated by transparent automated rules; check the original report before acting.</p>
           </aside>
         ) : (
           <aside className="panel source-detail feed-empty-detail">Select a source to inspect its connector and attribution details.</aside>
