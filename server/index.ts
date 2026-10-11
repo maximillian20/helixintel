@@ -16,6 +16,10 @@ import { runAlertEvaluation } from './alerts';
 import { registerWorkspaceRoutes } from './workspace-routes';
 import { MarketStore } from './market-store';
 import { registerMarketRoutes } from './market-routes';
+import { registerMapRoutes } from './map-routes';
+import { GeoStore, syncAllGeo } from './map-geo';
+import { AdsbClient } from './map-adsb';
+import { PlaceStore, evaluatePlaceAlerts } from './map-service';
 import { runMarketSync } from './market-sync';
 import { captureReportSnapshots, clearEventCache, evaluateMarketAlerts } from './market-service';
 import { SourceStore, type SourceDefinition, type StoredArticle, type SyncState } from './source-store';
@@ -38,7 +42,12 @@ const publicSources: SourceDefinition[] = buildSources(pollIntervalMs);
 const sourceStore = new SourceStore();
 const analysisStore = new AnalysisStore(sourceStore.handle);
 const marketStore = new MarketStore(sourceStore.handle);
+const geoStore = new GeoStore(sourceStore.handle);
+const placeStore = new PlaceStore(sourceStore.handle);
+const adsbClient = new AdsbClient(process.env, fetch, () => new Date());
+let geoBusy = false;
 let marketTimer: NodeJS.Timeout | undefined;
+let geoTimer: NodeJS.Timeout | undefined;
 let marketBusy = false;
 const eventClients = new Set<Response>();
 const syncOwnerId = `${process.pid}-${randomUUID()}`;
@@ -245,6 +254,24 @@ async function marketTick() {
   }
 }
 
+/** Background map work: incremental USGS/EONET fetches (each source isolated), then saved-area alerts. */
+async function geoTick() {
+  if (geoBusy) return;
+  geoBusy = true;
+  try {
+    if (process.env.MAP_SYNC_DISABLED !== '1') {
+      const changed = await syncAllGeo({ geo: geoStore, env: process.env, fetcher: fetch, now: () => new Date() });
+      if (changed) publishEvent('map-updated', {});
+    }
+    const { created } = evaluatePlaceAlerts({ store: sourceStore, analysis: analysisStore, geo: geoStore, env: process.env, now: new Date() }, placeStore);
+    if (created > 0) publishEvent('alerts-updated', {});
+  } catch (error) {
+    console.warn('[map] tick failed', error instanceof Error ? error.message : error);
+  } finally {
+    geoBusy = false;
+  }
+}
+
 function syncSources(force = false) {
   if (activeSync) return activeSync;
   activeSync = (async () => {
@@ -431,6 +458,10 @@ registerMarketRoutes({
   kick: () => { if (process.env.NODE_ENV !== 'test') setTimeout(() => { void marketTick(); }, 250); },
 });
 
+registerMapRoutes({
+  app, store: sourceStore, analysis: analysisStore, geo: geoStore, places: placeStore, adsb: adsbClient, requireClientId, publish: publishEvent,
+});
+
 const distDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '../dist');
 if (process.env.NODE_ENV === 'production' && existsSync(distDirectory)) {
   app.use(express.static(distDirectory, { index: false, maxAge: '1h' }));
@@ -446,6 +477,9 @@ function startBackgroundSync() {
   void marketTick();
   marketTimer = setInterval(() => { void marketTick(); }, 60_000);
   marketTimer.unref();
+  void geoTick();
+  geoTimer = setInterval(() => { void geoTick(); }, 60_000);
+  geoTimer.unref();
 }
 
 if (process.env.NODE_ENV !== 'test') {
@@ -460,6 +494,7 @@ if (process.env.NODE_ENV !== 'test') {
   const shutdown = () => {
     if (scheduler) clearInterval(scheduler);
     if (marketTimer) clearInterval(marketTimer);
+    if (geoTimer) clearInterval(geoTimer);
     for (const client of eventClients) client.end();
     eventClients.clear();
     server.close(() => {
