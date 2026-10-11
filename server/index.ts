@@ -20,6 +20,8 @@ import { registerMapRoutes } from './map-routes';
 import { GeoStore, syncAllGeo } from './map-geo';
 import { AdsbClient } from './map-adsb';
 import { PlaceStore, evaluatePlaceAlerts } from './map-service';
+import { SibStore } from './sib-store';
+import { registerSibRoutes } from './sib-routes';
 import { runMarketSync } from './market-sync';
 import { captureReportSnapshots, clearEventCache, evaluateMarketAlerts } from './market-service';
 import { SourceStore, type SourceDefinition, type StoredArticle, type SyncState } from './source-store';
@@ -44,6 +46,7 @@ const analysisStore = new AnalysisStore(sourceStore.handle);
 const marketStore = new MarketStore(sourceStore.handle);
 const geoStore = new GeoStore(sourceStore.handle);
 const placeStore = new PlaceStore(sourceStore.handle);
+const sibStore = new SibStore(sourceStore.handle);
 const adsbClient = new AdsbClient(process.env, fetch, () => new Date());
 let geoBusy = false;
 let marketTimer: NodeJS.Timeout | undefined;
@@ -457,6 +460,8 @@ registerMarketRoutes({
   app, store: sourceStore, analysis: analysisStore, market: marketStore, requireClientId, publish: publishEvent,
   kick: () => { if (process.env.NODE_ENV !== 'test') setTimeout(() => { void marketTick(); }, 250); },
 });
+
+registerSibRoutes({ app, analysis: analysisStore, sibs: sibStore, requireClientId, publish: publishEvent });
 
 registerMapRoutes({
   app, store: sourceStore, analysis: analysisStore, geo: geoStore, places: placeStore, adsb: adsbClient, requireClientId, publish: publishEvent,
