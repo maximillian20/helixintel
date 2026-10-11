@@ -7,7 +7,7 @@ import {
 import type { ConfidenceLevel, CountryStatus, Severity } from '../src/data/feedTypes';
 
 /** Bump when the rules change; stored assessments with another version are recomputed automatically. */
-export const CLASSIFIER_VERSION = 'rules-1';
+export const CLASSIFIER_VERSION = 'rules-2';
 
 type Rule = {
   id: string;
@@ -200,8 +200,8 @@ function severityFor(impact: number, points: number): Severity {
   if (impact <= 0) return 'Unassessed';
   if (impact >= 4) return 'Critical';
   if (impact === 3) return points >= 6 ? 'Critical' : 'High';
-  if (impact === 2) return points >= 4 ? 'High' : 'Moderate';
-  return points >= 3 ? 'Moderate' : 'Watch';
+  if (impact === 2) return points >= 4 ? 'High' : 'Medium';
+  return points >= 3 ? 'Medium' : 'Low';
 }
 
 function capitalise(value: string) {
