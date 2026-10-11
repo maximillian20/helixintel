@@ -42,3 +42,13 @@ Environment variables: see `.env.example`. Set `SOURCE_DB_PATH` to a persistent 
 
 Credentials are read only on the server. A source without its credential is shown as "Setup required" on the Sources page and is never called.
 Fast sources are checked every 15 minutes (`SOURCE_POLL_INTERVAL_MS`), CISA every 6 hours, ReliefWeb and ENTSO-E hourly, EIA every 12 hours.
+
+## Incidents, country assessments and threat indicators
+
+These three screens use only stored public-source records and what you enter yourself. Nothing is pre-filled with sample content.
+
+- **Incidents**: create from any feed item ("Create incident", "Add to existing incident"), link several reports, edit, assign owners, track actions, print or download a brief. Every change is recorded with the actor name (set it from the round button in the header) and a timestamp.
+- **Country assessments**: analyst-assigned ratings for six categories, each requiring a written rationale and linked evidence. Every save is a new version. There is no automated country score: no defensible method is configured, so automated scores are shown as Unassessed.
+- **Threat indicators**: four indicators calculated from GDACS, CISA KEV and the news sources, compared with the previous eight complete weeks. History starts when the app first reads a source, so most indicators show "Insufficient history" for the first weeks (CISA KEV and GDACS backfill sooner).
+- **Privacy**: there are no user accounts. Incidents, assessments, watchlists and alerts are private to the browser that created them, and the server enforces this on every request.
+- **Persistence**: data is stored in the SQLite file (`SOURCE_DB_PATH`). On Render's free tier the file is reset on each redeploy unless a persistent disk is attached.
