@@ -27,3 +27,18 @@ NODE_ENV=production npm start
 ```
 
 Environment variables: see `.env.example`. Set `SOURCE_DB_PATH` to a persistent disk path to keep the SQLite store across deploys. A `Dockerfile` and `render.yaml` are included.
+
+## Public data sources and credentials
+
+| Source | Access | Server setting |
+| --- | --- | --- |
+| BBC News World, UN News | Free RSS | none |
+| GDACS (disasters, with alert levels and coordinates) | Free RSS, CC BY 4.0 | none |
+| GDELT DOC 2.0 (news headlines) | Free API | optional `GDELT_QUERY` |
+| CISA Known Exploited Vulnerabilities | Free JSON | none |
+| ReliefWeb | Free, needs a pre-approved app name (https://apidoc.reliefweb.int/) | `RELIEFWEB_APPNAME` |
+| US EIA oil spot prices | Free key (https://www.eia.gov/opendata/register.php) | `EIA_API_KEY` |
+| ENTSO-E Transparency Platform | Free token by email request to transparency@entsoe.eu | `ENTSOE_API_TOKEN` (parser not yet implemented) |
+
+Credentials are read only on the server. A source without its credential is shown as "Setup required" on the Sources page and is never called.
+Fast sources are checked every 15 minutes (`SOURCE_POLL_INTERVAL_MS`), CISA every 6 hours, ReliefWeb and ENTSO-E hourly, EIA every 12 hours.
