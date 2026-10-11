@@ -3,13 +3,14 @@ import { openSharedEvents } from './data/eventHub.ts';
 import type { Map as LeafletMap } from 'leaflet';
 import { CircleMarker, LayersControl, MapContainer, Popup, TileLayer, Tooltip } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { alertFeed, sibDraft, watchlists } from './data/demo.ts';
+import { alertFeed, watchlists } from './data/demo.ts';
 import { AlertsBell, AnalystMenu } from './workspace/AlertsBell.tsx';
 import { AddToCountryDialog, CountriesModule } from './workspace/CountriesModule.tsx';
 import { IncidentLinkDialog, IncidentsModule } from './workspace/IncidentsModule.tsx';
 import { IndicatorsModule } from './workspace/IndicatorsModule.tsx';
 import { MapModule } from './workspace/MapModule.tsx';
 import { MarketModule } from './workspace/MarketModule.tsx';
+import { SibModule } from './workspace/SibModule.tsx';
 import type { Navigate } from './workspace/shared.tsx';
 import { findPlaces, type Place } from './data/geo.ts';
 import {
@@ -1108,91 +1109,6 @@ function IntelligenceFeedPanel({ feed, onNavigate, focusId }: { feed: PublicFeed
   );
 }
 
-function SIBBuilderPanel() {
-  return (
-    <div className="module-view">
-      <div className="module-header">
-        <div>
-          <div className="eyebrow">Security information bulletin</div>
-          <h2>SIB builder</h2>
-        </div>
-        <div className="action-cluster">
-          <button className="ghost-button">Approve</button>
-          <button className="outline-button">Export PDF</button>
-        </div>
-      </div>
-
-      <div className="sib-layout">
-        <div className="panel form-panel">
-          <div className="panel-header">
-            <h3>Bulletin record</h3>
-            <span className="status-pill success">Draft</span>
-          </div>
-
-          <div className="form-grid">
-            <label>
-              Title
-              <input defaultValue={sibDraft.title} />
-            </label>
-            <label>
-              Classification
-              <input defaultValue={sibDraft.classification} />
-            </label>
-            <label>
-              Severity
-              <input defaultValue={sibDraft.severity} />
-            </label>
-            <label>
-              Location
-              <input defaultValue={sibDraft.location} />
-            </label>
-            <label className="wide">
-              Executive summary
-              <textarea defaultValue={sibDraft.summary} />
-            </label>
-            <label className="wide">
-              Current situation
-              <textarea defaultValue={sibDraft.currentSituation} />
-            </label>
-            <label className="wide">
-              Recommended actions
-              <textarea defaultValue={sibDraft.recommendedActions.join('\n')} />
-            </label>
-          </div>
-        </div>
-
-        <div className="panel preview-panel">
-          <div className="panel-header">
-            <h3>Preview</h3>
-            <span className={`badge ${severityTone[sibDraft.severity as keyof typeof severityTone]}`}>{sibDraft.severity}</span>
-          </div>
-
-          <div className="sib-banner">
-            <strong>{sibDraft.title}</strong>
-            <span>{sibDraft.classification}</span>
-          </div>
-
-          <div className="sib-content">
-            <p><strong>Location:</strong> {sibDraft.location}</p>
-            <p><strong>Summary:</strong> {sibDraft.summary}</p>
-            <p><strong>Current situation:</strong> {sibDraft.currentSituation}</p>
-            <p><strong>Impact on employees:</strong> {sibDraft.impactOnEmployees}</p>
-            <p><strong>Impact on operations:</strong> {sibDraft.impactOnOperations}</p>
-            <p><strong>Approver:</strong> {sibDraft.approver}</p>
-          </div>
-
-          <div className="export-row">
-            <button className="ghost-button">PDF</button>
-            <button className="ghost-button">Word</button>
-            <button className="ghost-button">HTML</button>
-            <button className="ghost-button">Email</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function WatchlistPanel() {
   return (
     <div className="module-view">
@@ -1535,7 +1451,7 @@ function App() {
         {activeView === 'Market Impact' && <MarketModule focusId={focusId} onNavigate={navigate} />}
         {activeView === 'Incidents' && <IncidentsModule focusId={focusId} onNavigate={navigate} />}
         {activeView === 'Country Assessments' && <CountriesModule focusId={focusId} onNavigate={navigate} />}
-        {activeView === 'SIBs' && <SIBBuilderPanel />}
+        {activeView === 'SIBs' && <SibModule focusId={focusId} onNavigate={navigate} />}
         {activeView === 'Watchlists' && <WatchlistPanel />}
         {activeView === 'Sources' && <SourcesPanel />}
       </main>
