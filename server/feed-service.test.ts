@@ -105,18 +105,18 @@ test('state is per client', () => {
 test('severity override is applied, filterable, and survives reclassification', () => {
   const store = new SourceStore(':memory:');
   seed(store);
-  const result = updateItemState(store, A, id(4), { severityOverride: 'Moderate' }, new Date('2026-10-11T08:00:00.000Z'));
-  assert.equal(result?.item.severity, 'Moderate');
+  const result = updateItemState(store, A, id(4), { severityOverride: 'Medium' }, new Date('2026-10-11T08:00:00.000Z'));
+  assert.equal(result?.item.severity, 'Medium');
   assert.equal(result?.item.assessedSeverity, 'Unassessed');
   assert.equal(result?.item.severityOverridden, true);
-  assert.deepEqual(ids(buildFeedPage(store, A, filters({ severity: 'Moderate' }), 1, 20)).sort(), ['3', '4']);
+  assert.deepEqual(ids(buildFeedPage(store, A, filters({ severity: 'Medium' }), 1, 20)).sort(), ['3', '4']);
   assert.ok(!ids(buildFeedPage(store, A, filters({ severity: 'Unassessed' }), 1, 20)).includes('4'));
 
-  const stale = [...store.getAssessments().values()].map((row) => ({ ...row, severity: 'Watch', classifierVersion: 'old' }));
+  const stale = [...store.getAssessments().values()].map((row) => ({ ...row, severity: 'Low', classifierVersion: 'old' }));
   store.saveAssessments(stale);
   assert.equal(ensureAssessments(store), 7);
   const after = buildFeedPage(store, A, DEFAULT_FEED_FILTERS, 1, 20).items.find((item) => item.id === id(4));
-  assert.equal(after?.severity, 'Moderate', 'manual override preserved');
+  assert.equal(after?.severity, 'Medium', 'manual override preserved');
   assert.equal(after?.assessedSeverity, 'Unassessed', 'automatic assessment refreshed');
 
   const cleared = updateItemState(store, A, id(4), { severityOverride: null });

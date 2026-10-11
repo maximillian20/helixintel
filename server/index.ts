@@ -15,8 +15,9 @@ import {
   trendData,
 } from '../src/data/demo';
 import { z } from 'zod';
-import { fetchRssSource, SourceFetchError } from './rss';
-import { buildFeedPage, ensureAssessments, updateItemState } from './feed-service';
+import { SourceFetchError } from './rss';
+import { buildSources, fetchSource, missingCredentials } from './connectors';
+import { buildFeedPage, buildOverview, ensureAssessments, updateItemState } from './feed-service';
 import { isKnownCountryCode } from '../src/data/countries';
 import { REVIEW_STATUSES, SEVERITIES, type FeedFilters } from '../src/data/feedTypes';
 import { SourceStore, type SourceDefinition, type StoredArticle, type SyncState } from './source-store';
@@ -34,28 +35,7 @@ const pollIntervalMs = Math.min(
 );
 const maxRetryDelayMs = 6 * 60 * 60 * 1000;
 const manualCheckCooldownMs = 60 * 1000;
-const publicSources: SourceDefinition[] = [
-  {
-    id: 'bbc-world',
-    name: 'BBC News World',
-    url: 'https://feeds.bbci.co.uk/news/world/rss.xml',
-    format: 'RSS 2.0',
-    coverage: 'International news, English-language world desk',
-    cadence: `${Math.round(pollIntervalMs / 60000)}-minute polling; 15-minute article cache`,
-    attribution: 'BBC News World',
-    termsUrl: 'https://www.bbc.co.uk/usingthebbc/terms-of-use/#15metadataandrssfeeds',
-  },
-  {
-    id: 'un-news',
-    name: 'UN News',
-    url: 'https://news.un.org/feed/subscribe/en/news/all/rss.xml',
-    format: 'RSS 2.0',
-    coverage: 'Global affairs and United Nations reporting, English-language feed',
-    cadence: `${Math.round(pollIntervalMs / 60000)}-minute polling; 15-minute article cache`,
-    attribution: 'UN News',
-    termsUrl: 'https://news.un.org/en/',
-  },
-];
+const publicSources: SourceDefinition[] = buildSources(pollIntervalMs);
 
 const sourceStore = new SourceStore();
 const eventClients = new Set<Response>();
@@ -97,9 +77,16 @@ function publishEvent(event: string, payload: unknown) {
 }
 
 function sourceStatus(source: SourceDefinition, state: SyncState | undefined, itemCount: number) {
+  const intervalMs = source.intervalMs ?? pollIntervalMs;
+  const missing = missingCredentials(source, process.env);
+  let status: SyncState['status'] = state?.status ?? 'not_checked';
+  if (missing.length > 0) status = 'setup_required';
+  // A source that last succeeded long ago is stale even if no later attempt has failed yet.
+  else if (status === 'healthy' && state?.lastSuccessAt && Date.now() - Date.parse(state.lastSuccessAt) > 3 * intervalMs) status = 'stale';
+  const { credential, ...rest } = source;
   return {
-    ...source,
-    status: state?.status ?? 'not_checked',
+    ...rest,
+    status,
     itemCount,
     lastAttemptAt: state?.lastAttemptAt ?? null,
     lastSuccessAt: state?.lastSuccessAt ?? null,
@@ -108,7 +95,10 @@ function sourceStatus(source: SourceDefinition, state: SyncState | undefined, it
     lastError: state?.lastError ?? null,
     consecutiveFailures: state?.consecutiveFailures ?? 0,
     updateMode: 'periodic',
-    pollIntervalMs,
+    pollIntervalMs: intervalMs,
+    setup: credential
+      ? { required: missing.length > 0, envVars: credential.envVars, instructions: credential.instructions, signupUrl: credential.signupUrl }
+      : null,
   };
 }
 
@@ -123,7 +113,7 @@ function buildFeedResponse(cached: boolean) {
     .filter((value): value is string => value !== null)
     .sort()
     .at(-1) ?? null;
-  const publicItems = records.slice(0, 250).map((record: StoredArticle) => ({
+  const publicItems = records.slice(0, 600).map((record: StoredArticle) => ({
     id: record.id,
     sourceRecordId: record.sourceRecordId,
     headline: record.headline,
@@ -138,7 +128,8 @@ function buildFeedResponse(cached: boolean) {
     verificationStatus: record.verificationStatus,
     attribution: record.attribution,
   }));
-  const allFailed = sources.length > 0 && sources.every((source) => source.status === 'unavailable' || source.status === 'stale');
+  const active = sources.filter((source) => source.status !== 'setup_required');
+  const allFailed = active.length > 0 && active.every((source) => source.status === 'unavailable' || source.status === 'stale');
 
   return {
     fetchedAt: lastUpdatedAt,
@@ -150,22 +141,35 @@ function buildFeedResponse(cached: boolean) {
   };
 }
 
+function redact(message: string) {
+  let safe = message;
+  for (const name of ['EIA_API_KEY', 'ENTSOE_API_TOKEN', 'RELIEFWEB_APPNAME']) {
+    const value = process.env[name]?.trim();
+    if (value) safe = safe.split(value).join('[redacted]');
+  }
+  return safe;
+}
+
 async function syncOneSource(source: SourceDefinition, force: boolean) {
+  if (missingCredentials(source, process.env).length > 0) return false; // "Setup required": never called without credentials
   const currentState = sourceStore.getSyncState(source.id);
   const nowMs = Date.now();
+  const intervalMs = source.intervalMs ?? pollIntervalMs;
   if (!force && currentState?.nextRunAt && Date.parse(currentState.nextRunAt) > nowMs) return false;
   if (force && currentState?.lastAttemptAt && nowMs - Date.parse(currentState.lastAttemptAt) < manualCheckCooldownMs) return false;
 
   const attemptedAt = new Date(nowMs).toISOString();
   try {
-    const result = await fetchRssSource(source, {
-      etag: currentState?.etag ?? null,
-      lastModified: currentState?.lastModified ?? null,
+    const result = await fetchSource(source, {
+      fetcher: fetch,
+      env: process.env,
+      now: new Date(),
+      checkpoint: { etag: currentState?.etag ?? null, lastModified: currentState?.lastModified ?? null },
     });
     const checkedAt = new Date().toISOString();
-    const nextRunAt = new Date(Date.now() + pollIntervalMs).toISOString();
+    const nextRunAt = new Date(Date.now() + intervalMs).toISOString();
     if (result.notModified) {
-      sourceStore.markNotModified(source.id, checkedAt, nextRunAt, result.etag, result.lastModified);
+      sourceStore.markNotModified(source.id, checkedAt, nextRunAt, result.etag ?? null, result.lastModified ?? null);
       publishEvent('source-sync-updated', { sourceId: source.id, status: 'healthy', lastCheckedAt: checkedAt });
       return false;
     }
@@ -175,8 +179,8 @@ async function syncOneSource(source: SourceDefinition, force: boolean) {
       articles: result.articles,
       checkedAt,
       nextRunAt,
-      etag: result.etag,
-      lastModified: result.lastModified,
+      etag: result.etag ?? null,
+      lastModified: result.lastModified ?? null,
     });
     if (changes.newCount > 0 || changes.updatedCount > 0) {
       publishEvent('public-feed-updated', {
@@ -202,7 +206,7 @@ async function syncOneSource(source: SourceDefinition, force: boolean) {
       source.id,
       attemptedAt,
       nextRunAt,
-      error instanceof Error ? error.message.slice(0, 500) : 'Source request failed.',
+      redact(error instanceof Error ? error.message : 'Source request failed.').slice(0, 500),
     );
     console.warn(`[source-sync] ${source.id} ${failure.status}: ${error instanceof Error ? error.message : 'request failed'}`);
     publishEvent('source-sync-updated', {
@@ -221,7 +225,7 @@ function syncSources(force = false) {
     const acquired = sourceStore.acquireSyncLease(
       syncOwnerId,
       new Date(),
-      new Date(Date.now() + 120000),
+      new Date(Date.now() + 180000),
     );
     if (!acquired) return { attempted: 0, changed: false };
     try {
@@ -285,8 +289,15 @@ app.get('/api/feed', (_req: Request, res: Response) => {
 });
 
 app.get('/api/feed/public', async (req: Request, res: Response) => {
-  const result = await syncSources(req.query.refresh === 'true');
-  res.json(buildFeedResponse(!result.changed));
+  // Only an explicit refresh waits for the sources; normal requests answer from the cache immediately,
+  // so one slow or failing source can never delay the page.
+  if (req.query.refresh === 'true') {
+    const result = await syncSources(true);
+    res.json(buildFeedResponse(!result.changed));
+    return;
+  }
+  void syncSources(false);
+  res.json(buildFeedResponse(true));
 });
 
 app.get('/api/sources', (_req: Request, res: Response) => {
@@ -347,6 +358,12 @@ const feedStateSchema = z.object({
   (value) => value.reviewStatus !== undefined || value.watchlisted !== undefined || value.severityOverride !== undefined,
   { message: 'Provide at least one field to change.' },
 );
+
+app.get('/api/feed/overview', (req: Request, res: Response) => {
+  const clientId = requireClientId(req, res);
+  if (!clientId) return;
+  res.json(buildOverview(sourceStore, clientId));
+});
 
 app.get('/api/feed/items', (req: Request, res: Response) => {
   const clientId = requireClientId(req, res);

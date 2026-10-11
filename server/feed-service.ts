@@ -1,12 +1,14 @@
 import { assessItem, assessmentConfidence, CLASSIFIER_VERSION, ruleImpact, ruleLabel } from './classify';
-import type { AssessmentRow, SourceStore, StoredArticle, UserItemState, UserItemStatePatch } from './source-store';
-import { GLOBAL_CODE, UNKNOWN_CODE, countryName } from '../src/data/countries';
+import type { ArticleEnrichment, AssessmentRow, SourceStore, StoredArticle, UserItemState, UserItemStatePatch } from './source-store';
+import { GLOBAL_CODE, UNKNOWN_CODE, countryName, findCountryCodes } from '../src/data/countries';
+import { countryCentroids } from '../src/data/centroids';
 import {
   SEVERITIES,
   matchesFilters,
   type FeedFilters,
   type FeedItemDto,
   type FeedPage,
+  type ItemLocation,
   type Severity,
 } from '../src/data/feedTypes';
 
@@ -20,13 +22,19 @@ function asSeverity(value: string | null | undefined): Severity | null {
 export function ensureAssessments(store: SourceStore, now = new Date()) {
   const records = store.getRecords();
   const existing = store.getAssessments();
+  const enrichments = store.getEnrichments();
   const pending: AssessmentRow[] = [];
   for (const record of records) {
     if (existing.get(record.id)?.classifierVersion === CLASSIFIER_VERSION) continue;
     const assessment = assessItem({ headline: record.headline, summary: record.summary });
+    const enrichment = enrichments.get(record.id);
+    const provided = enrichment?.severity;
+    const countryCodes = enrichment?.countryCodes?.length
+      ? enrichment.countryCodes
+      : enrichment?.global ? [GLOBAL_CODE] : assessment.countryCodes;
     pending.push({
       articleId: record.id,
-      severity: assessment.severity,
+      severity: provided ? provided.value : assessment.severity,
       impact: assessment.impact,
       scope: assessment.scope,
       urgency: assessment.urgency,
@@ -36,8 +44,9 @@ export function ensureAssessments(store: SourceStore, now = new Date()) {
       deathsStated: assessment.deathsStated,
       injured: assessment.injured,
       hedged: assessment.hedged,
-      rationale: assessment.rationale,
-      countryCodes: assessment.countryCodes,
+      rationale: provided ? provided.reason : assessment.rationale,
+      countryCodes,
+      method: provided?.method === 'source' ? 'source' : 'rules',
       classifierVersion: assessment.version,
       classifiedAt: now.toISOString(),
     });
@@ -74,15 +83,31 @@ function countCorroboration(records: StoredArticle[], assessments: Map<string, A
   return counts;
 }
 
+/** Only supported event locations are mapped: source coordinates, or a single affected country (approximate). */
+function locate(record: StoredArticle, row: AssessmentRow, enrichment: ArticleEnrichment | undefined): ItemLocation | null {
+  if (enrichment?.location) {
+    return { lat: enrichment.location.lat, lng: enrichment.location.lng, precision: 'event', label: enrichment.location.label };
+  }
+  let codes: string[];
+  if (enrichment?.countryCodes?.length) codes = row.countryCodes.filter((code) => code !== GLOBAL_CODE && code !== UNKNOWN_CODE);
+  else if (enrichment) return null; // e.g. vulnerabilities: no place, so no map position is invented
+  else codes = findCountryCodes(record.headline); // countries named in the headline itself, not merely in the summary
+  if (codes.length !== 1) return null;
+  const centre = countryCentroids[codes[0]];
+  if (!centre) return null;
+  return { lat: centre[0], lng: centre[1], precision: 'approximate', label: `${countryName(codes[0])} (country centre, approximate)` };
+}
+
 function toDto(
   record: StoredArticle,
+  enrichment: ArticleEnrichment | undefined,
   row: AssessmentRow,
   state: UserItemState | undefined,
   corroborating: number,
 ): FeedItemDto {
   const assessed = asSeverity(row.severity) ?? 'Unassessed';
   const override = asSeverity(state?.severityOverride);
-  const confidence = assessmentConfidence({
+  const rulesConfidence = assessmentConfidence({
     severity: assessed,
     strongCount: row.strongCount,
     figuresStated: row.deathsStated,
@@ -90,7 +115,10 @@ function toDto(
     hedged: row.hedged,
     officialHumanitarianSource: record.sourceId === 'un-news' && row.categories.some((id) => ['famine', 'health-emergency', 'evacuation', 'repression', 'mass-displacement'].includes(id)),
   });
-  const sourceNote = corroborating > 0
+  const confidence = row.method === 'source' && assessed !== 'Unassessed' ? 'High' as const : rulesConfidence;
+  const sourceNote = row.method === 'source'
+    ? `Source: ${record.sourceName}.`
+    : corroborating > 0
     ? `Source: ${record.sourceName} (publisher-provided); ${corroborating} other report${corroborating === 1 ? '' : 's'} in this feed cover the same country and type of event.`
     : `Source: ${record.sourceName} (publisher-provided); no other report in this feed corroborates it yet.`;
   const realCountries = row.countryCodes.filter((code) => code !== GLOBAL_CODE && code !== UNKNOWN_CODE);
@@ -108,6 +136,10 @@ function toDto(
     retrievedAt: record.retrievedAt,
     lastCheckedAt: record.lastCheckedAt,
     verificationStatus: record.verificationStatus,
+    sourceId: record.sourceId,
+    category: enrichment?.category ?? row.categories.map((id) => ruleLabel(id))[0] ?? '',
+    location: locate(record, row, enrichment),
+    assessmentMethod: override ? 'manual' : row.method,
     severity: override ?? assessed,
     assessedSeverity: assessed,
     severityOverridden: override !== null,
@@ -115,7 +147,7 @@ function toDto(
     severityRationale: `${row.rationale} ${sourceNote}`,
     assessmentConfidence: confidence,
     categories: row.categories,
-    categoryLabels: row.categories.map((id) => ruleLabel(id)),
+    categoryLabels: enrichment?.category ? [enrichment.category] : row.categories.map((id) => ruleLabel(id)),
     corroboratingReports: corroborating,
     countries: row.countryCodes.map((code) => ({ code, name: countryName(code) })),
     countryStatus: realCountries.length > 0 ? 'identified' : row.countryCodes.includes(GLOBAL_CODE) ? 'global' : 'unknown',
@@ -132,12 +164,13 @@ function buildAllItems(store: SourceStore, clientId: string): FeedItemDto[] {
   const records = store.getRecords();
   const assessments = store.getAssessments();
   const states = store.getUserStates(clientId);
+  const enrichments = store.getEnrichments();
   const corroboration = countCorroboration(records, assessments);
   const items: FeedItemDto[] = [];
   for (const record of records) {
     const row = assessments.get(record.id);
     if (!row) continue;
-    items.push(toDto(record, row, states.get(record.id), corroboration.get(record.id) ?? 0));
+    items.push(toDto(record, enrichments.get(record.id), row, states.get(record.id), corroboration.get(record.id) ?? 0));
   }
   return items.sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt) || a.id.localeCompare(b.id));
 }
@@ -163,6 +196,18 @@ export function buildFeedPage(
     page: currentPage,
     pageSize,
     totalPages,
+  };
+}
+
+/** Everything the Overview map and headline list need, from the same model as the Intelligence Feed. */
+export function buildOverview(store: SourceStore, clientId: string, limit = 600) {
+  const all = buildAllItems(store, clientId);
+  const items = all.slice(0, limit);
+  return {
+    items,
+    total: all.length,
+    returned: items.length,
+    unlocated: items.filter((item) => item.location === null).length,
   };
 }
 

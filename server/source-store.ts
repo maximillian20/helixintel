@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export type SyncStatus = 'healthy' | 'stale' | 'unavailable' | 'not_checked';
+export type SyncStatus = 'healthy' | 'stale' | 'unavailable' | 'not_checked' | 'setup_required';
 
 export type SourceDefinition = {
   id: string;
@@ -14,6 +14,24 @@ export type SourceDefinition = {
   cadence: string;
   attribution: string;
   termsUrl: string;
+  /** Which connector fetches this source. Defaults to the generic RSS reader. */
+  connector?: 'rss' | 'gdacs' | 'gdelt' | 'cisa-kev' | 'reliefweb' | 'eia' | 'entsoe';
+  kind?: 'news' | 'hazard' | 'humanitarian' | 'cyber' | 'energy';
+  /** How often the source is checked. Defaults to the global polling interval. */
+  intervalMs?: number;
+  /** Present when the source needs a free credential that is configured on the server. */
+  credential?: { envVars: string[]; instructions: string; signupUrl: string };
+};
+
+/** Source-provided structure that the headline and summary alone cannot give. */
+export type ArticleEnrichment = {
+  category?: string;
+  /** Countries affected by the event, from source metadata. Omit when the source gives none. */
+  countryCodes?: string[];
+  /** True when the item applies worldwide rather than to a place (e.g. a software vulnerability). */
+  global?: boolean;
+  location?: { lat: number; lng: number; label: string };
+  severity?: { value: 'Critical' | 'High' | 'Medium' | 'Low'; reason: string; method: 'source' | 'rules' };
 };
 
 export type NormalizedArticle = {
@@ -23,6 +41,7 @@ export type NormalizedArticle = {
   summary: string;
   publishedAt: string;
   sourceModifiedAt: string | null;
+  enrichment?: ArticleEnrichment;
 };
 
 export type SyncState = {
@@ -38,7 +57,7 @@ export type SyncState = {
   lastError: string | null;
 };
 
-export type StoredArticle = NormalizedArticle & {
+export type StoredArticle = Omit<NormalizedArticle, 'enrichment'> & {
   id: string;
   sourceId: string;
   sourceName: string;
@@ -63,6 +82,8 @@ export type AssessmentRow = {
   hedged: boolean;
   rationale: string;
   countryCodes: string[];
+  /** 'source' when the provider supplied the severity, otherwise 'rules'. */
+  method: 'source' | 'rules';
   classifierVersion: string;
   classifiedAt: string;
 };
@@ -182,10 +203,20 @@ export class SourceStore {
         updated_at TEXT NOT NULL,
         PRIMARY KEY (client_id, article_id)
       );
+      CREATE TABLE IF NOT EXISTS record_enrichment (
+        article_id TEXT PRIMARY KEY REFERENCES source_records(id) ON DELETE CASCADE,
+        enrichment_json TEXT NOT NULL
+      );
       CREATE INDEX IF NOT EXISTS item_user_state_watch_idx ON item_user_state(client_id, watchlisted);
     `);
     this.addColumnIfMissing('source_records', 'source_name', "TEXT NOT NULL DEFAULT ''");
     this.addColumnIfMissing('source_records', 'source_url', "TEXT NOT NULL DEFAULT ''");
+    this.addColumnIfMissing('item_assessments', 'method', "TEXT NOT NULL DEFAULT 'rules'");
+    // One-time vocabulary migration: Moderate -> Medium, Watch -> Low (manual corrections are kept).
+    this.database.exec(`
+      UPDATE item_user_state SET severity_override = 'Medium' WHERE severity_override = 'Moderate';
+      UPDATE item_user_state SET severity_override = 'Low' WHERE severity_override = 'Watch';
+    `);
   }
 
   getSyncStates() {
@@ -300,12 +331,19 @@ export class SourceStore {
         attribution = excluded.attribution
     `);
     const getExisting = this.database.prepare('SELECT * FROM source_records WHERE id = ?');
+    const getEnrichmentJson = this.database.prepare('SELECT enrichment_json FROM record_enrichment WHERE article_id = ?');
+    const upsertEnrichment = this.database.prepare(`
+      INSERT INTO record_enrichment (article_id, enrichment_json) VALUES (?, ?)
+      ON CONFLICT(article_id) DO UPDATE SET enrichment_json = excluded.enrichment_json
+    `);
+    const dropAssessment = this.database.prepare('DELETE FROM item_assessments WHERE article_id = ?');
     const insertChange = this.database.prepare(`
       INSERT INTO source_changes (source_id, record_id, headline, changed_at, fields_json)
       VALUES (?, ?, ?, ?, ?)
     `);
     let newCount = 0;
     let updatedCount = 0;
+    const changedFieldsForId = new Map<string, boolean>();
 
     const transaction = this.database.transaction(() => {
       for (const article of input.articles) {
@@ -323,6 +361,7 @@ export class SourceStore {
             }
           }
           if (changedFields.length > 0) {
+            changedFieldsForId.set(id, true);
             updatedCount += 1;
             insertChange.run(input.source.id, id, article.headline, input.checkedAt, JSON.stringify(changedFields));
           }
@@ -343,6 +382,17 @@ export class SourceStore {
           input.checkedAt,
           input.source.attribution,
         );
+
+        // Only new or changed content is (re)assessed: a changed headline, summary or source metadata
+        // drops the stored assessment so it is recomputed once. User state is never touched here.
+        const enrichmentJson = article.enrichment ? JSON.stringify(article.enrichment) : null;
+        const previousEnrichment = (getEnrichmentJson.get(id) as { enrichment_json: string } | undefined)?.enrichment_json ?? null;
+        if (enrichmentJson !== previousEnrichment) {
+          if (enrichmentJson) upsertEnrichment.run(id, enrichmentJson);
+          else this.database.prepare('DELETE FROM record_enrichment WHERE article_id = ?').run(id);
+          if (existing) dropAssessment.run(id);
+        }
+        if (existing && changedFieldsForId.get(id)) dropAssessment.run(id);
       }
 
       this.database.prepare(`
@@ -400,6 +450,11 @@ export class SourceStore {
     return Number((this.database.prepare('SELECT COUNT(*) AS total FROM source_records').get() as { total: number }).total);
   }
 
+  getEnrichments(): Map<string, ArticleEnrichment> {
+    const rows = this.database.prepare('SELECT article_id, enrichment_json FROM record_enrichment').all() as Array<{ article_id: string; enrichment_json: string }>;
+    return new Map(rows.map((row) => [row.article_id, JSON.parse(row.enrichment_json) as ArticleEnrichment]));
+  }
+
   getAssessments(): Map<string, AssessmentRow> {
     const rows = this.database.prepare('SELECT * FROM item_assessments').all() as Array<Record<string, unknown>>;
     return new Map(rows.map((value) => [String(value.article_id), {
@@ -416,6 +471,7 @@ export class SourceStore {
       hedged: Number(value.hedged) === 1,
       rationale: String(value.rationale),
       countryCodes: JSON.parse(String(value.country_codes_json)) as string[],
+      method: value.method === 'source' ? 'source' : 'rules',
       classifierVersion: String(value.classifier_version),
       classifiedAt: String(value.classified_at),
     }]));
@@ -425,8 +481,8 @@ export class SourceStore {
     const upsert = this.database.prepare(`
       INSERT INTO item_assessments (
         article_id, severity, impact, scope, urgency, categories_json, strong_count, deaths, deaths_stated,
-        injured, hedged, rationale, country_codes_json, classifier_version, classified_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        injured, hedged, rationale, country_codes_json, method, classifier_version, classified_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(article_id) DO UPDATE SET
         severity = excluded.severity,
         impact = excluded.impact,
@@ -440,6 +496,7 @@ export class SourceStore {
         hedged = excluded.hedged,
         rationale = excluded.rationale,
         country_codes_json = excluded.country_codes_json,
+        method = excluded.method,
         classifier_version = excluded.classifier_version,
         classified_at = excluded.classified_at
     `);
@@ -448,7 +505,7 @@ export class SourceStore {
         upsert.run(
           row.articleId, row.severity, row.impact, row.scope, row.urgency, JSON.stringify(row.categories),
           row.strongCount, row.deaths, row.deathsStated ? 1 : 0, row.injured, row.hedged ? 1 : 0,
-          row.rationale, JSON.stringify(row.countryCodes), row.classifierVersion, row.classifiedAt,
+          row.rationale, JSON.stringify(row.countryCodes), row.method, row.classifierVersion, row.classifiedAt,
         );
       }
     });

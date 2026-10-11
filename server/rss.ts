@@ -28,7 +28,7 @@ export class SourceFetchError extends Error {
   }
 }
 
-function textValue(value: unknown) {
+export function textValue(value: unknown) {
   if (typeof value === 'string' || typeof value === 'number') return String(value).trim();
   if (value && typeof value === 'object' && '#text' in value) {
     return String((value as { '#text': unknown })['#text'] ?? '').trim();
@@ -109,7 +109,7 @@ export function parseRssArticles(xml: string, source: SourceDefinition): Normali
   });
 }
 
-async function readBoundedBody(response: Response) {
+export async function readBoundedBody(response: Response) {
   const declaredLength = Number(response.headers.get('content-length'));
   if (Number.isFinite(declaredLength) && declaredLength > maxFeedBytes) {
     throw new SourceFetchError('Feed exceeds the 2 MB size limit.');
@@ -139,7 +139,7 @@ async function readBoundedBody(response: Response) {
   return new TextDecoder().decode(body);
 }
 
-function retryAfterMilliseconds(response: Response) {
+export function retryAfterMilliseconds(response: Response) {
   const header = response.headers.get('retry-after');
   if (!header) return undefined;
   const seconds = Number(header);
@@ -160,13 +160,13 @@ export async function fetchRssSource(
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const headers = new Headers({
       accept: 'application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.8',
-      'user-agent': 'GlobalSecurityIntelligence/0.1 RSS monitor',
+      'user-agent': 'Mozilla/5.0 (compatible; GlobalSecurityIntelligence/0.2; RSS monitor)',
     });
     if (checkpoint.etag) headers.set('if-none-match', checkpoint.etag);
     if (checkpoint.lastModified) headers.set('if-modified-since', checkpoint.lastModified);
 
     try {
-      const response = await fetcher(source.url, { headers, signal: AbortSignal.timeout(12000) });
+      const response = await fetcher(source.url, { headers, signal: AbortSignal.timeout(25000) });
       const etag = response.headers.get('etag') ?? checkpoint.etag;
       const lastModified = response.headers.get('last-modified') ?? checkpoint.lastModified;
       if (response.status === 304) return { notModified: true, articles: [], etag, lastModified };
