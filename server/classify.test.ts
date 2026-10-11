@@ -17,7 +17,7 @@ test('assesses the reports shown in the feed screenshot', () => {
     headline: 'Four dead and thousands without power after Hurricane Isaias lashes US',
     summary: 'Roofs were ripped off buildings after Isaias barrelled into the US on Friday evening, before it weakened to a post-tropical cyclone.',
   });
-  assert.equal(hurricane.severity, 'Moderate');
+  assert.equal(hurricane.severity, 'Medium');
   assert.equal(hurricane.deaths, 4);
   assert.deepEqual(hurricane.countryCodes, ['US']);
 
@@ -25,7 +25,7 @@ test('assesses the reports shown in the feed screenshot', () => {
     headline: "'Time for Ukraine to get new president,' says Trump after Zelensky condemns diesel deal",
     summary: "Ukraine's leader had said the deal with Russia to release diesel into the US would help Moscow fund the war.",
   });
-  assert.equal(trump.severity, 'Watch');
+  assert.equal(trump.severity, 'Low');
   assert.ok(trump.countryCodes.includes('UA') && trump.countryCodes.includes('RU'));
 
   const earhart = assessItem({
@@ -44,7 +44,7 @@ test('missing information is Unassessed, never Low or Watch', () => {
 test('casualty figures drive impact', () => {
   assert.equal(severityOf('Earthquake kills 250 in Nepal'), 'Critical');
   assert.equal(severityOf('Strike kills 12 in Gaza'), 'High');
-  assert.equal(severityOf('Floods kill five in Kenya'), 'Moderate');
+  assert.equal(severityOf('Floods kill five in Kenya'), 'Medium');
   assert.equal(severityOf('Dozens killed in attack on market in Sudan'), 'High');
   assert.equal(severityOf('Hundreds killed in massacre in Darfur'), 'Critical');
 });
@@ -69,7 +69,7 @@ test('sport and entertainment uses of ambiguous words are not security events', 
 });
 
 test('foiled attacks are reduced one level', () => {
-  assert.equal(severityOf('Police foil attack plot in France'), 'Moderate');
+  assert.equal(severityOf('Police foil attack plot in France'), 'Medium');
 });
 
 test('hedged reports are flagged', () => {
@@ -102,5 +102,5 @@ test('negated casualty phrases do not count as injuries; strong quakes and hunge
   assert.equal(foiled.injured, null);
   assert.equal(foiled.severity, 'High', 'a foiled incident at a nuclear plant stays High, one level below Critical');
   assert.equal(assessItem({ headline: 'Earthquake of magnitude 7.1 hits Japan, tsunami warning issued', summary: 'Hundreds feared trapped.' }).severity, 'High');
-  assert.equal(assessItem({ headline: 'Hunger crisis worsens in Yemen', summary: 'WFP appeals for funds.' }).severity, 'Moderate');
+  assert.equal(assessItem({ headline: 'Hunger crisis worsens in Yemen', summary: 'WFP appeals for funds.' }).severity, 'Medium');
 });
