@@ -14,6 +14,10 @@ import { REVIEW_STATUSES, SEVERITIES, type FeedFilters } from '../src/data/feedT
 import { AnalysisStore } from './analysis-store';
 import { runAlertEvaluation } from './alerts';
 import { registerWorkspaceRoutes } from './workspace-routes';
+import { MarketStore } from './market-store';
+import { registerMarketRoutes } from './market-routes';
+import { runMarketSync } from './market-sync';
+import { captureReportSnapshots, clearEventCache, evaluateMarketAlerts } from './market-service';
 import { SourceStore, type SourceDefinition, type StoredArticle, type SyncState } from './source-store';
 
 dotenv.config();
@@ -33,6 +37,9 @@ const publicSources: SourceDefinition[] = buildSources(pollIntervalMs);
 
 const sourceStore = new SourceStore();
 const analysisStore = new AnalysisStore(sourceStore.handle);
+const marketStore = new MarketStore(sourceStore.handle);
+let marketTimer: NodeJS.Timeout | undefined;
+let marketBusy = false;
 const eventClients = new Set<Response>();
 const syncOwnerId = `${process.pid}-${randomUUID()}`;
 let activeSync: Promise<{ attempted: number; changed: boolean }> | null = null;
@@ -212,6 +219,29 @@ async function syncOneSource(source: SourceDefinition, force: boolean) {
       nextRunAt,
     });
     return false;
+  }
+}
+
+/** Background market work: freeze new event classifications, fetch due prices, evaluate watchlist alerts. */
+async function marketTick() {
+  if (marketBusy) return;
+  marketBusy = true;
+  try {
+    const now = () => new Date();
+    const deps = { store: sourceStore, analysis: analysisStore, market: marketStore, env: process.env, now: now() };
+    clearEventCache();
+    captureReportSnapshots(deps);
+    // MARKET_SYNC_DISABLED=1 stops price fetching (events, snapshots and alerts keep working on stored prices).
+    if (process.env.MARKET_SYNC_DISABLED !== '1') {
+      const result = await runMarketSync({ market: marketStore, env: process.env, fetcher: fetch, now });
+      if (result.fetched.length > 0) publishEvent('market-updated', { kind: 'prices' });
+    }
+    const { created } = evaluateMarketAlerts({ ...deps, now: now() });
+    if (created > 0) publishEvent('alerts-updated', {});
+  } catch (error) {
+    console.warn('[market] tick failed', error instanceof Error ? error.message : error);
+  } finally {
+    marketBusy = false;
   }
 }
 
@@ -396,6 +426,11 @@ registerWorkspaceRoutes({
   app, store: sourceStore, analysis: analysisStore, sources: publicSources, requireClientId, publish: publishEvent,
 });
 
+registerMarketRoutes({
+  app, store: sourceStore, analysis: analysisStore, market: marketStore, requireClientId, publish: publishEvent,
+  kick: () => { if (process.env.NODE_ENV !== 'test') setTimeout(() => { void marketTick(); }, 250); },
+});
+
 const distDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '../dist');
 if (process.env.NODE_ENV === 'production' && existsSync(distDirectory)) {
   app.use(express.static(distDirectory, { index: false, maxAge: '1h' }));
@@ -408,6 +443,9 @@ function startBackgroundSync() {
   void syncSources(false);
   scheduler = setInterval(() => { void syncSources(false); }, Math.min(pollIntervalMs, minPollIntervalMs));
   scheduler.unref();
+  void marketTick();
+  marketTimer = setInterval(() => { void marketTick(); }, 60_000);
+  marketTimer.unref();
 }
 
 if (process.env.NODE_ENV !== 'test') {
@@ -421,6 +459,7 @@ if (process.env.NODE_ENV !== 'test') {
 
   const shutdown = () => {
     if (scheduler) clearInterval(scheduler);
+    if (marketTimer) clearInterval(marketTimer);
     for (const client of eventClients) client.end();
     eventClients.clear();
     server.close(() => {
