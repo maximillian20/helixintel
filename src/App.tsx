@@ -8,6 +8,7 @@ import { AlertsBell, AnalystMenu } from './workspace/AlertsBell.tsx';
 import { AddToCountryDialog, CountriesModule } from './workspace/CountriesModule.tsx';
 import { IncidentLinkDialog, IncidentsModule } from './workspace/IncidentsModule.tsx';
 import { IndicatorsModule } from './workspace/IndicatorsModule.tsx';
+import { MapModule } from './workspace/MapModule.tsx';
 import { MarketModule } from './workspace/MarketModule.tsx';
 import type { Navigate } from './workspace/shared.tsx';
 import { findPlaces, type Place } from './data/geo.ts';
@@ -682,7 +683,7 @@ function usePublicFeedItems(enabled: boolean, filters: FeedFilters, page: number
   return { data, dataRequestedPage, loading, error, reload: () => setReloadToken((token) => token + 1) };
 }
 
-function IntelligenceFeedPanel({ feed, onNavigate }: { feed: PublicFeedState; onNavigate: Navigate }) {
+function IntelligenceFeedPanel({ feed, onNavigate, focusId }: { feed: PublicFeedState; onNavigate: Navigate; focusId?: string }) {
   const [dialog, setDialog] = useState<{ ids: string[]; mode: 'create' | 'existing' } | null>(null);
   const [countryDialog, setCountryDialog] = useState<ViewItem | null>(null);
   const [filters, setFilters] = useState<FeedFilters>(DEFAULT_FEED_FILTERS);
@@ -692,6 +693,20 @@ function IntelligenceFeedPanel({ feed, onNavigate }: { feed: PublicFeedState; on
   const [pendingId, setPendingId] = useState('');
   const [actionError, setActionError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+
+  // Opened from another view (e.g. the Map's "Open report"): select that report and narrow the list to it.
+  useEffect(() => {
+    if (!focusId) return undefined;
+    let active = true;
+    void fetchOverview().then((overview) => {
+      const found = overview.items.find((candidate) => candidate.id === focusId);
+      if (!active || !found) return;
+      setFilters((current) => ({ ...current, search: found.headline.slice(0, 80) }));
+      setSelectedCache(toViewItem(found));
+      setSelectedId(found.id);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [focusId]);
 
   const debouncedSearch = useDebounced(filters.search, 300);
   const serverFilters = useMemo<FeedFilters>(
@@ -1514,7 +1529,8 @@ function App() {
         </header>
 
         {activeView === 'Overview' && <OverviewPanel feed={feed} />}
-        {activeView === 'Intelligence Feed' && <IntelligenceFeedPanel feed={feed} onNavigate={navigate} />}
+        {activeView === 'Map' && <MapModule focusId={focusId} onNavigate={navigate} />}
+        {activeView === 'Intelligence Feed' && <IntelligenceFeedPanel feed={feed} onNavigate={navigate} focusId={focusId} />}
         {activeView === 'Threat Indicators' && <IndicatorsModule focusId={focusId} onNavigate={navigate} />}
         {activeView === 'Market Impact' && <MarketModule focusId={focusId} onNavigate={navigate} />}
         {activeView === 'Incidents' && <IncidentsModule focusId={focusId} onNavigate={navigate} />}
