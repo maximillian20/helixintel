@@ -159,7 +159,7 @@ function toDto(
   };
 }
 
-function buildAllItems(store: SourceStore, clientId: string): FeedItemDto[] {
+export function buildAllItems(store: SourceStore, clientId: string): FeedItemDto[] {
   ensureAssessments(store);
   const records = store.getRecords();
   const assessments = store.getAssessments();

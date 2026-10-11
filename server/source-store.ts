@@ -1,4 +1,6 @@
 import Database from 'better-sqlite3';
+
+export type DatabaseHandle = InstanceType<typeof Database>;
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -207,6 +209,13 @@ export class SourceStore {
         article_id TEXT PRIMARY KEY REFERENCES source_records(id) ON DELETE CASCADE,
         enrichment_json TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS source_checks (
+        source_id TEXT NOT NULL,
+        day TEXT NOT NULL,
+        successes INTEGER NOT NULL DEFAULT 0,
+        failures INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (source_id, day)
+      );
       CREATE INDEX IF NOT EXISTS item_user_state_watch_idx ON item_user_state(client_id, watchlisted);
     `);
     this.addColumnIfMissing('source_records', 'source_name', "TEXT NOT NULL DEFAULT ''");
@@ -298,6 +307,7 @@ export class SourceStore {
         consecutive_failures = 0,
         last_error = NULL
     `).run(sourceId, checkedAt, checkedAt, checkedAt, nextRunAt, etag, lastModified);
+    this.recordCheck(sourceId, checkedAt, true);
 
     this.database.prepare('UPDATE source_records SET last_checked_at = ? WHERE source_id = ?')
       .run(checkedAt, sourceId);
@@ -422,6 +432,7 @@ export class SourceStore {
     });
 
     transaction();
+    this.recordCheck(input.source.id, input.checkedAt, true);
     return { newCount, updatedCount };
   }
 
@@ -443,6 +454,7 @@ export class SourceStore {
         last_error = excluded.last_error
     `).run(sourceId, status, attemptedAt, nextRunAt, failures, error);
 
+    this.recordCheck(sourceId, attemptedAt, false);
     return { status, consecutiveFailures: failures };
   }
 
@@ -583,6 +595,40 @@ export class SourceStore {
       return next;
     });
     return apply();
+  }
+
+  /** Counts one check against its UTC day. Used to tell "no events" apart from "source was not being read". */
+  private recordCheck(sourceId: string, at: string, ok: boolean) {
+    this.database.prepare(`
+      INSERT INTO source_checks (source_id, day, successes, failures) VALUES (?, ?, ?, ?)
+      ON CONFLICT(source_id, day) DO UPDATE SET
+        successes = successes + excluded.successes,
+        failures = failures + excluded.failures
+    `).run(sourceId, at.slice(0, 10), ok ? 1 : 0, ok ? 0 : 1);
+  }
+
+  getChecks(sourceId: string): Array<{ day: string; successes: number; failures: number }> {
+    return (this.database.prepare('SELECT day, successes, failures FROM source_checks WHERE source_id = ? ORDER BY day').all(sourceId) as Array<Record<string, unknown>>)
+      .map((row) => ({ day: String(row.day), successes: Number(row.successes), failures: Number(row.failures) }));
+  }
+
+  /**
+   * Removes records that are confirmed demo content (source "demo" with verification status "demo").
+   * Real records and any user work attached to them are never matched.
+   */
+  purgeDemoRecords(): number {
+    return this.database.prepare("DELETE FROM source_records WHERE source_id = 'demo' AND verification_status = 'demo'").run().changes;
+  }
+
+  /** Newest publication time among a source's stored records. */
+  latestPublished(sourceId: string): string | null {
+    const row = this.database.prepare('SELECT MAX(published_at) AS latest FROM source_records WHERE source_id = ?').get(sourceId) as { latest: string | null };
+    return row.latest ?? null;
+  }
+
+  /** Shared database handle for the analysis stores (incidents, assessments, alerts). */
+  get handle(): DatabaseHandle {
+    return this.database;
   }
 
   close() {

@@ -87,3 +87,20 @@ test('only one poller owns the sync lease at a time', () => {
     store.close();
   }
 });
+
+test('purging demo content removes only confirmed demo records and keeps real records and user work', () => {
+  const store = new SourceStore(':memory:');
+  try {
+    save(store, [article], '2026-10-07T12:00:00.000Z');
+    const realId = store.getRecords()[0].id;
+    store.updateUserState('client-purge-1', realId, { watchlisted: true }, '2026-10-07T12:05:00.000Z');
+    store.handle.prepare(`INSERT INTO source_records (id, source_id, source_name, source_url, source_record_id, canonical_url, headline, summary, published_at, retrieved_at, last_checked_at, verification_status, attribution)
+      VALUES ('demo:1', 'demo', 'Demo', '', 'd1', 'https://demo.test/1', 'Demo', 'x', '2026-10-07T12:00:00.000Z', '2026-10-07T12:00:00.000Z', '2026-10-07T12:00:00.000Z', 'demo', 'Demo')`).run();
+    assert.equal(store.purgeDemoRecords(), 1);
+    assert.equal(store.getRecords().length, 1);
+    assert.equal(store.getUserStates('client-purge-1').get(realId)?.watchlisted, true);
+    assert.equal(store.purgeDemoRecords(), 0);
+  } finally {
+    store.close();
+  }
+});

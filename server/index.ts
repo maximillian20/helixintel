@@ -5,21 +5,15 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  analystSummary,
-  countryAssessments,
-  dashboardMetrics,
-  incidents,
-  intelligenceFeed,
-  priorityIntelligence,
-  trendData,
-} from '../src/data/demo';
 import { z } from 'zod';
 import { SourceFetchError } from './rss';
 import { buildSources, fetchSource, missingCredentials } from './connectors';
 import { buildFeedPage, buildOverview, ensureAssessments, updateItemState } from './feed-service';
 import { isKnownCountryCode } from '../src/data/countries';
 import { REVIEW_STATUSES, SEVERITIES, type FeedFilters } from '../src/data/feedTypes';
+import { AnalysisStore } from './analysis-store';
+import { runAlertEvaluation } from './alerts';
+import { registerWorkspaceRoutes } from './workspace-routes';
 import { SourceStore, type SourceDefinition, type StoredArticle, type SyncState } from './source-store';
 
 dotenv.config();
@@ -38,6 +32,7 @@ const manualCheckCooldownMs = 60 * 1000;
 const publicSources: SourceDefinition[] = buildSources(pollIntervalMs);
 
 const sourceStore = new SourceStore();
+const analysisStore = new AnalysisStore(sourceStore.handle);
 const eventClients = new Set<Response>();
 const syncOwnerId = `${process.pid}-${randomUUID()}`;
 let activeSync: Promise<{ attempted: number; changed: boolean }> | null = null;
@@ -88,6 +83,7 @@ function sourceStatus(source: SourceDefinition, state: SyncState | undefined, it
     ...rest,
     status,
     itemCount,
+    latestPublishedAt: sourceStore.latestPublished(source.id),
     lastAttemptAt: state?.lastAttemptAt ?? null,
     lastSuccessAt: state?.lastSuccessAt ?? null,
     lastCheckedAt: state?.lastCheckedAt ?? null,
@@ -230,6 +226,12 @@ function syncSources(force = false) {
     if (!acquired) return { attempted: 0, changed: false };
     try {
       const changed = await Promise.all(publicSources.map((source) => syncOneSource(source, force)));
+      try {
+        const { created } = runAlertEvaluation(analysisStore, { store: sourceStore, sources: publicSources, env: process.env, now: new Date() });
+        if (created > 0) publishEvent('alerts-updated', {});
+      } catch (error) {
+        console.warn('[alerts] evaluation failed', error instanceof Error ? error.message : error);
+      }
       return { attempted: publicSources.length, changed: changed.some(Boolean) };
     } finally {
       sourceStore.releaseSyncLease(syncOwnerId);
@@ -273,21 +275,6 @@ app.get('/api/health', (_req: Request, res: Response) => {
   });
 });
 
-app.get('/api/dashboard', (_req: Request, res: Response) => {
-  res.json({
-    metrics: dashboardMetrics,
-    trend: trendData,
-    priority: priorityIntelligence,
-    summary: analystSummary,
-    incidents,
-    countries: countryAssessments,
-  });
-});
-
-app.get('/api/feed', (_req: Request, res: Response) => {
-  res.json({ items: intelligenceFeed, total: intelligenceFeed.length, mode: 'demo' });
-});
-
 app.get('/api/feed/public', async (req: Request, res: Response) => {
   // Only an explicit refresh waits for the sources; normal requests answer from the cache immediately,
   // so one slow or failing source can never delay the page.
@@ -318,14 +305,6 @@ app.get('/api/sources/:id/history', (req: Request, res: Response) => {
   }
   const items = sourceStore.getRecentChanges(sourceId);
   res.json({ items, total: items.length });
-});
-
-app.get('/api/incidents', (_req: Request, res: Response) => {
-  res.json({ items: incidents, total: incidents.length });
-});
-
-app.get('/api/countries', (_req: Request, res: Response) => {
-  res.json({ items: countryAssessments, total: countryAssessments.length });
 });
 
 const clientIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/);
@@ -413,6 +392,10 @@ app.patch('/api/feed/state', (req: Request, res: Response) => {
   }
 });
 
+registerWorkspaceRoutes({
+  app, store: sourceStore, analysis: analysisStore, sources: publicSources, requireClientId, publish: publishEvent,
+});
+
 const distDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '../dist');
 if (process.env.NODE_ENV === 'production' && existsSync(distDirectory)) {
   app.use(express.static(distDirectory, { index: false, maxAge: '1h' }));
@@ -430,6 +413,8 @@ function startBackgroundSync() {
 if (process.env.NODE_ENV !== 'test') {
   const server = app.listen(port, () => {
     console.log(`Global Security Intelligence API listening on http://localhost:${port}`);
+    const purged = sourceStore.purgeDemoRecords();
+    if (purged > 0) console.log(`Removed ${purged} demo record(s) from an earlier version.`);
     ensureAssessments(sourceStore);
     startBackgroundSync();
   });
@@ -448,5 +433,5 @@ if (process.env.NODE_ENV !== 'test') {
   process.once('SIGTERM', shutdown);
 }
 
-export { app, buildFeedResponse, syncSources, sourceStore };
+export { app, buildFeedResponse, syncSources, sourceStore, analysisStore };
 export default app;
