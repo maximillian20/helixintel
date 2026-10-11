@@ -128,7 +128,7 @@ export function useNow(intervalMs = 30_000) {
   return now;
 }
 
-export type Navigate = (view: 'Incidents' | 'Country Assessments' | 'Threat Indicators' | 'Market Impact' | 'Intelligence Feed', id?: string) => void;
+export type Navigate = (view: 'Incidents' | 'Country Assessments' | 'Threat Indicators' | 'Market Impact' | 'Intelligence Feed' | 'Map', id?: string) => void;
 
 /** Filter and selection state that survives switching tabs (kept for the browser session, not sent anywhere). */
 export function usePersistentState<T>(key: string, initial: T) {
