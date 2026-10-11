@@ -1,5 +1,31 @@
-export const SEVERITIES = ['Critical', 'High', 'Moderate', 'Watch', 'Unassessed'] as const;
+export const SEVERITIES = ['Critical', 'High', 'Medium', 'Low', 'Unassessed'] as const;
 export type Severity = (typeof SEVERITIES)[number];
+
+/** One colour per severity, shared by badges, headlines and map markers. */
+export const SEVERITY_COLORS: Record<Severity, string> = {
+  Critical: '#DC2626',
+  High: '#F97316',
+  Medium: '#F59E0B',
+  Low: '#22C55E',
+  Unassessed: '#94A3B8',
+};
+/** Higher rank = more severe. Unassessed ranks lowest so an assessed report always wins a grouped marker. */
+export const SEVERITY_RANK: Record<Severity, number> = { Critical: 4, High: 3, Medium: 2, Low: 1, Unassessed: 0 };
+
+export type AssessmentMethod = 'source' | 'rules' | 'manual';
+export const ASSESSMENT_METHOD_LABELS: Record<AssessmentMethod, string> = {
+  source: 'Provided by the source',
+  rules: 'Automated, rules-based',
+  manual: 'Manual correction',
+};
+
+export type ItemLocation = {
+  lat: number;
+  lng: number;
+  /** event = coordinates supplied by the source for the event; approximate = country centre. */
+  precision: 'event' | 'approximate';
+  label: string;
+};
 
 export const REVIEW_STATUSES = ['Reviewed', 'Unreviewed'] as const;
 export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
@@ -22,6 +48,11 @@ export type FeedItemDto = {
   retrievedAt: string;
   lastCheckedAt: string;
   verificationStatus: string;
+  sourceId: string;
+  /** Short category label, e.g. "earthquake" or "known exploited vulnerability". */
+  category: string;
+  location: ItemLocation | null;
+  assessmentMethod: AssessmentMethod;
   /** Effective severity: the user's override when set, otherwise the automatic assessment. */
   severity: Severity;
   assessedSeverity: Severity;

@@ -63,3 +63,12 @@ export async function saveItemState(articleId: string, change: ItemStateChange):
   if (!response.ok) throw new Error(await readError(response));
   return await response.json() as { item: FeedItemDto; watchlistTotal: number };
 }
+
+export type OverviewPayload = { items: FeedItemDto[]; total: number; returned: number; unlocated: number };
+
+/** The same report model as the Intelligence Feed, for the Overview headlines and map. */
+export async function fetchOverview(signal?: AbortSignal): Promise<OverviewPayload> {
+  const response = await fetch('/api/feed/overview', { headers: { 'X-Client-Id': getClientId() }, signal });
+  if (!response.ok) throw new Error(await readError(response));
+  return await response.json() as OverviewPayload;
+}
