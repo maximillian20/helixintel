@@ -69,3 +69,30 @@ The **Market Impact** screen connects events (de-duplicated reports and your inc
 - **Links** come from named entities, sector keywords and country exposure rules, each with its explanation. You can confirm, reject or add links; suggestions and your decisions are stored separately.
 - **Associations and correlations** use only classifications frozen when the app first saw an event, so history accumulates from deployment and shows *Insufficient history* until enough distinct, non-overlapping events exist. Results are labelled *Preliminary association* or *Historically observed association* (n of at least 20 and a Holm-corrected sign test below 0.05). Correlation needs 60 aligned days and 10 event days.
 - Alerts (watchlist tab) are optional, deduplicated per event and asset, and suppressed during a per-asset cooldown. Nothing here is advice or a forecast.
+
+## Map workspace
+
+The **Map** page is an interactive geographic workspace. Everything on it is real data; there is no demo mode or synthetic fallback. A layer whose source is blocked or needs setup shows that status while the other layers keep working.
+
+**Layers** (each can be switched on and off independently): news and agency reports, GDELT news mentions, ReliefWeb, GDACS, USGS earthquakes, NASA EONET events, your incidents, saved places and areas, country risk shading, and aircraft.
+
+| Source | How it is read | Terms and limits |
+| --- | --- | --- |
+| USGS earthquakes | Summary GeoJSON feeds (`.../feed/v1.0/summary/{level}_{hour,day,week,month}.geojson`), about every 5 minutes. Each fetch uses the smallest feed that covers the time since the last success. Default level M4.5+ (`USGS_FEED_LEVEL`). | US government data; credit USGS. The feed pages state no rate limit; the app makes one request per source per interval. |
+| NASA EONET v3 | `/api/v3/events?status=all&days=…`, about every 30 minutes (30 days first, then 7). | No key or limit is stated. NASA says event locations are not official precise data. |
+| GDACS, GDELT, ReliefWeb | The existing feed connectors; the map reads their stored records. | ReliefWeb needs `RELIEFWEB_APPNAME` (shown as "Setup required"). GDELT places are reported locations from country mentions in headlines. |
+| ADSB.lol aircraft | `GET {ADSB_API_BASE}/v2/point/{lat}/{lon}/{radius_nm}` for the visible area only (max 250 nm). | ODbL licence; attribution required; ADSB.lol asks to be contacted before production use. **The documentation pages could not be opened while this was built, so the request/response format follows the readsb v2 convention and is unverified; check it against https://api.adsb.lol/docs.** Set `ADSB_CONTACT_CONFIRMED=1` after contacting them. OpenSky and Flightradar24 are not used. |
+| Base map | OpenStreetMap standard tiles unless `MAP_TILE_URL` is set. | OSM's public tile servers are for light use (https://operations.osmfoundation.org/policies/tiles/); no bulk or offline downloading. For production traffic use a self-hosted or commercial provider and set `MAP_TILE_URL` and `MAP_TILE_ATTRIBUTION`. |
+| Country outlines | Natural Earth 110m (public domain) fetched by the server from `MAP_COUNTRY_BOUNDARIES_URL` (default: jsDelivr copy) and cached; if it cannot be loaded the layer falls back to labelled country-centre discs. | The default URL could not be tested from the build environment. |
+
+**Time filtering.** Each record is filtered by its own time: event time for USGS and EONET, publication time for news, GDELT, ReliefWeb and GDACS alerts (a GDACS alert time is when GDACS published it), and the incident date for incidents. Aircraft are live positions only: they ignore the time range, and the layer is disabled when a custom range ends before today.
+
+**Severity and accuracy.** Colours are shared with the feed (Critical `#DC2626`, High `#F97316`, Medium `#F59E0B`, Low `#22C55E`, Unassessed `#94A3B8`). USGS and EONET records are always *Unassessed*: earthquake magnitude, PAGER alert and EONET magnitudes are shown as supplied and never converted. GDACS keeps the feed's documented mapping (Red = Critical, Orange = High, Green = Low), which describes the hazard, not business impact. Markers use source coordinates, analyst-entered incident coordinates, or the country centre (dashed ring, labelled approximate). Records without a usable location are listed separately and never placed.
+
+**Duplicates.** Hazard records from different providers are linked when they have the same hazard type and lie within 100 km and 6 h (earthquakes), 500 km and 5 days (cyclones) or 300 km and 7 days (others). All records are kept; counts show records and distinct events separately.
+
+**Country risk shading** is a separate layer: the highest category rating in the latest saved, evidence-backed country assessment (Low to Severe). Countries without an assessment are not shaded.
+
+**Aircraft.** Only the visible area is queried (movement is debounced), responses are cached and shared between browsers, polling stops when the layer is off or the tab is hidden, and positions fade after 30 s and are removed after 120 s (these thresholds are this app's, not the provider's). Coverage is provider-dependent; a missing aircraft does not mean anything is wrong. Callsign, altitude, speed, heading and similar fields are shown only when supplied, and no airline or route is inferred.
+
+**Saved places and alerts.** Save a location, a radius or a bounding box (kept on the server, per browser). Optional in-app alerts cover new events with provider or analyst coordinates inside the place, filtered by minimum severity and category, deduplicated per place and event, with a cooldown, and never back-filled. They are labelled "geographic match, not confirmed business impact". On Render's free plan the database is lost on redeploy unless a persistent disk is attached.
