@@ -13,6 +13,25 @@ import {
   watchlists,
 } from './data/demo.ts';
 import { findPlaces, type Place } from './data/geo.ts';
+import {
+  GLOBAL_CODE,
+  UNKNOWN_CODE,
+  countries,
+  countryName,
+  sortedCountries,
+} from './data/countries.ts';
+import { fetchFeedPage, saveItemState, type ItemStateChange } from './data/feedApi.ts';
+import {
+  DEFAULT_FEED_FILTERS,
+  SEVERITIES,
+  hasActiveFilters,
+  matchesFilters,
+  type ConfidenceLevel,
+  type FeedFilters,
+  type FeedItemDto,
+  type FeedPage,
+  type Severity,
+} from './data/feedTypes.ts';
 
 const severityTone = {
   Critical: 'critical',
@@ -37,29 +56,6 @@ const navItems = [
   'Sources',
   'Settings',
 ] as const;
-
-type FeedItem = Omit<
-  (typeof intelligenceFeed)[number],
-  'sourceType' | 'country' | 'region' | 'type' | 'severity' | 'reliability' | 'confidence' | 'relevance' | 'watchlist' | 'reviewStatus'
-> & {
-  id?: string;
-  sourceType: string;
-  country: string;
-  region: string;
-  type: string;
-  severity: string;
-  reliability: string;
-  confidence: string;
-  relevance: string;
-  watchlist: boolean;
-  reviewStatus: string;
-  sourceUrl?: string;
-  sourceModifiedAt?: string | null;
-  retrievedAt?: string;
-  lastCheckedAt?: string;
-  verificationStatus?: string;
-  attribution?: string;
-};
 
 type PublicFeedPayload = {
   fetchedAt: string | null;
@@ -179,7 +175,7 @@ function usePublicFeed() {
     };
   }, [load]);
 
-  return { payload, error, loading };
+  return { payload, error, loading, reload: load };
 }
 
 type PublicFeedState = ReturnType<typeof usePublicFeed>;
@@ -494,174 +490,391 @@ function OverviewPanel({ feed }: { feed: PublicFeedState }) {
   );
 }
 
-function IntelligenceFeedPanel() {
-  const [items, setItems] = useState<FeedItem[]>(intelligenceFeed);
-  const [publicItems, setPublicItems] = useState<FeedItem[]>([]);
-  const [publicSources, setPublicSources] = useState<PublicFeedPayload['sources']>([]);
-  const [feedMode, setFeedMode] = useState<'Demo' | 'Public web'>('Public web');
-  const [loadingPublic, setLoadingPublic] = useState(false);
-  const [publicError, setPublicError] = useState('');
-  const [publicFetchedAt, setPublicFetchedAt] = useState('');
-  const [publicFeedCached, setPublicFeedCached] = useState(false);
-  const [search, setSearch] = useState('');
-  const [severityFilter, setSeverityFilter] = useState('All');
-  const [countryFilter, setCountryFilter] = useState('All');
-  const [reviewFilter, setReviewFilter] = useState('All');
-  const [quickFilter, setQuickFilter] = useState<'All' | 'Needs review' | 'On watchlist'>('All');
-  const [selectedHeadline, setSelectedHeadline] = useState(items[0]?.headline ?? '');
-  const activeItems = feedMode === 'Demo' ? items : publicItems;
+const feedPageSize = 20;
 
-  const filteredItems = activeItems.filter((item) => {
-    const query = search.trim().toLowerCase();
-    const matchesSearch = !query || [
-      item.headline,
-      item.summary,
-      item.source,
-      item.country,
-      item.location,
-      item.entities,
-      item.type,
-    ].join(' ').toLowerCase().includes(query);
+type ViewItem = FeedItemDto & {
+  sourceType: string;
+  reliability: string;
+  location?: string;
+  region?: string;
+  entities?: string;
+  relevance?: string;
+};
 
-    return matchesSearch
-      && (severityFilter === 'All' || item.severity === severityFilter)
-      && (countryFilter === 'All' || item.country === countryFilter)
-      && (reviewFilter === 'All' || item.reviewStatus === reviewFilter)
-      && (quickFilter !== 'Needs review' || item.reviewStatus !== 'Reviewed')
-      && (quickFilter !== 'On watchlist' || item.watchlist);
-  });
+function severityClass(severity: string) {
+  return `sev-${severity.toLowerCase()}`;
+}
 
-  const selectedItem = filteredItems.find((item) => item.id === selectedHeadline || item.headline === selectedHeadline) ?? filteredItems[0];
-  const hasFilters = search !== '' || severityFilter !== 'All' || countryFilter !== 'All'
-    || reviewFilter !== 'All' || quickFilter !== 'All';
+function SeverityBadge({ severity, manual }: { severity: string; manual?: boolean }) {
+  return (
+    <span className={`badge ${severityClass(severity)}`} title={manual ? 'Severity set manually' : undefined}>
+      {severity}{manual ? ' *' : ''}
+    </span>
+  );
+}
 
-  async function loadPublicFeed() {
-    setFeedMode('Public web');
-    setLoadingPublic(true);
-    setPublicError('');
+function toViewItem(item: FeedItemDto): ViewItem {
+  return { ...item, sourceType: 'Publisher RSS', reliability: 'Not assessed' };
+}
 
-    try {
-      const response = await fetch('/api/feed/public');
-      const payload = await response.json() as PublicFeedPayload;
-      if (!response.ok) throw new Error(payload.error || `Public feeds returned HTTP ${response.status}`);
+const demoCountryCodes = new Map(countries.map((country) => [country.name, country.code]));
 
-      const mappedItems: FeedItem[] = payload.items.map((item) => ({
-        id: item.id,
-        headline: item.headline,
-        summary: item.summary,
-        source: item.source,
-        sourceType: 'Publisher RSS',
-        date: item.publishedAt,
-        location: 'Not geolocated',
-        country: 'Global',
-        region: 'Global',
-        type: 'Public report',
-        severity: 'Unassessed',
-        reliability: 'Not assessed',
-        confidence: 'Not assessed',
-        entities: '',
-        relevance: 'Not assessed',
-        watchlist: false,
-        reviewStatus: 'Unreviewed',
-        url: item.url,
-        sourceUrl: item.sourceUrl,
-        sourceModifiedAt: item.sourceModifiedAt,
-        retrievedAt: item.retrievedAt,
-        lastCheckedAt: item.lastCheckedAt,
-        verificationStatus: item.verificationStatus,
-        attribution: item.attribution,
-      }));
+function demoToViewItem(item: (typeof intelligenceFeed)[number], index: number): ViewItem {
+  const severity = (SEVERITIES as readonly string[]).includes(item.severity)
+    ? item.severity as Severity
+    : item.severity === 'Monitoring' ? 'Watch' : 'Unassessed';
+  const code = item.country === 'Global' ? GLOBAL_CODE : demoCountryCodes.get(item.country) ?? UNKNOWN_CODE;
+  const confidence = ['High', 'Medium', 'Low'].includes(item.confidence) ? item.confidence as ConfidenceLevel : 'Not assessed';
+  return {
+    id: `demo:${index}`,
+    headline: item.headline,
+    summary: item.summary,
+    url: item.url,
+    source: item.source,
+    sourceUrl: '',
+    attribution: item.source,
+    publishedAt: item.date,
+    sourceModifiedAt: null,
+    retrievedAt: item.date,
+    lastCheckedAt: item.date,
+    verificationStatus: 'demo',
+    severity,
+    assessedSeverity: severity,
+    severityOverridden: false,
+    severityOverriddenAt: null,
+    severityRationale: 'Demo data: this severity is illustrative and was not calculated from the report.',
+    assessmentConfidence: confidence,
+    categories: [],
+    categoryLabels: [item.type],
+    corroboratingReports: 0,
+    countries: [{ code, name: code === UNKNOWN_CODE ? item.country : countryName(code) }],
+    countryStatus: code === GLOBAL_CODE ? 'global' : code === UNKNOWN_CODE ? 'unknown' : 'identified',
+    reviewStatus: item.reviewStatus === 'Reviewed' ? 'Reviewed' : 'Unreviewed',
+    reviewedAt: null,
+    reviewedBy: null,
+    watchlisted: item.watchlist,
+    watchlistedAt: null,
+    sourceType: item.sourceType,
+    reliability: item.reliability,
+    location: item.location,
+    region: item.region,
+    entities: item.entities,
+    relevance: item.relevance,
+  };
+}
 
-      setPublicItems(mappedItems);
-      setPublicSources(payload.sources);
-      setPublicFetchedAt(payload.fetchedAt ?? '');
-      setPublicFeedCached(payload.cached);
-      setSelectedHeadline((currentHeadline) => mappedItems.some((item) => item.id === currentHeadline || item.headline === currentHeadline)
-        ? currentHeadline
-        : mappedItems[0]?.id ?? mappedItems[0]?.headline ?? '');
-      setPublicError(payload.error ?? '');
-    } catch (error) {
-      setPublicError(error instanceof Error ? error.message : 'Could not load public feeds.');
-    } finally {
-      setLoadingPublic(false);
-    }
-  }
+function countryText(item: FeedItemDto, limit = 3) {
+  const names = item.countries.map((country) => country.name);
+  if (names.length <= limit) return names.join(', ');
+  return `${names.slice(0, limit).join(', ')} +${names.length - limit}`;
+}
 
-  const publicFeedReloadRef = useRef(loadPublicFeed);
-  publicFeedReloadRef.current = loadPublicFeed;
+function useDebounced<T>(value: T, delay: number) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
+}
+
+function usePublicFeedItems(enabled: boolean, filters: FeedFilters, page: number) {
+  const [data, setData] = useState<FeedPage | null>(null);
+  const [dataRequestedPage, setDataRequestedPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [reloadToken, setReloadToken] = useState(0);
+  const { severity, country, review, watchlistOnly, search } = filters;
 
   useEffect(() => {
-    void publicFeedReloadRef.current();
-  }, []);
+    if (!enabled) return undefined;
+    const controller = new AbortController();
+    setLoading(true);
+    fetchFeedPage({ severity, country, review, watchlistOnly, search }, page, feedPageSize, controller.signal)
+      .then((result) => {
+        setData(result);
+        setDataRequestedPage(page);
+        setError('');
+        setLoading(false);
+      })
+      .catch((caught) => {
+        if (controller.signal.aborted) return;
+        setError(caught instanceof Error ? caught.message : 'Could not load reports.');
+        setLoading(false);
+      });
+    return () => controller.abort();
+  }, [enabled, severity, country, review, watchlistOnly, search, page, reloadToken]);
 
   useEffect(() => {
-    if (feedMode !== 'Public web') return undefined;
+    if (!enabled) return undefined;
     const events = new EventSource('/api/events');
-    let refreshTimer: number | undefined;
-    const refreshAfterSync = () => {
-      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
-      refreshTimer = window.setTimeout(() => void publicFeedReloadRef.current(), 250);
+    let timer: number | undefined;
+    const refresh = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => setReloadToken((token) => token + 1), 250);
     };
-    events.addEventListener('public-feed-updated', refreshAfterSync);
-    events.addEventListener('source-sync-updated', refreshAfterSync);
+    events.addEventListener('public-feed-updated', refresh);
+    events.addEventListener('source-sync-updated', refresh);
     return () => {
       events.close();
-      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [feedMode]);
+  }, [enabled]);
 
-  function updateSelectedItem(update: Partial<FeedItem>) {
-    if (!selectedItem) return;
-    const updateItems = feedMode === 'Demo' ? setItems : setPublicItems;
-    updateItems((currentItems) => currentItems.map((item) => (
-      (item.id ?? item.headline) === (selectedItem.id ?? selectedItem.headline) ? { ...item, ...update } : item
-    )));
+  return { data, dataRequestedPage, loading, error, reload: () => setReloadToken((token) => token + 1) };
+}
+
+function IntelligenceFeedPanel({ feed }: { feed: PublicFeedState }) {
+  const [feedMode, setFeedMode] = useState<'Demo' | 'Public web'>('Public web');
+  const [demoItems, setDemoItems] = useState<ViewItem[]>(() => intelligenceFeed.map(demoToViewItem));
+  const [filters, setFilters] = useState<FeedFilters>(DEFAULT_FEED_FILTERS);
+  const [page, setPage] = useState(1);
+  const [selectedId, setSelectedId] = useState('');
+  const [selectedCache, setSelectedCache] = useState<ViewItem | null>(null);
+  const [pendingId, setPendingId] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+
+  const isDemo = feedMode === 'Demo';
+  const debouncedSearch = useDebounced(filters.search, 300);
+  const serverFilters = useMemo<FeedFilters>(
+    () => ({ ...filters, search: debouncedSearch }),
+    [filters, debouncedSearch],
+  );
+  const publicFeed = usePublicFeedItems(!isDemo, serverFilters, page);
+  const pageData = publicFeed.data;
+
+  const demoFiltered = useMemo(() => demoItems.filter((item) => matchesFilters(item, filters)), [demoItems, filters]);
+  const items: ViewItem[] = isDemo ? demoFiltered : (pageData?.items ?? []).map(toViewItem);
+  const total = isDemo ? demoFiltered.length : pageData?.total ?? 0;
+  const datasetTotal = isDemo ? demoItems.length : pageData?.datasetTotal ?? 0;
+  const watchlistTotal = isDemo ? demoItems.filter((item) => item.watchlisted).length : pageData?.watchlistTotal ?? 0;
+  const totalPages = isDemo ? 1 : pageData?.totalPages ?? 1;
+  const currentPage = isDemo ? 1 : page;
+  const loading = !isDemo && publicFeed.loading;
+  const error = isDemo ? '' : publicFeed.error;
+  const filtersActive = hasActiveFilters(filters);
+
+  useEffect(() => {
+    // Only follow the server's page clamp for the page that was actually requested, not for stale data.
+    if (!isDemo && pageData && publicFeed.dataRequestedPage === page && pageData.page !== page) setPage(pageData.page);
+  }, [isDemo, pageData, page, publicFeed.dataRequestedPage]);
+
+  const selectedItem = items.find((item) => item.id === selectedId)
+    ?? (selectedId && selectedCache?.id === selectedId ? selectedCache : undefined)
+    ?? items[0];
+
+  function updateFilters(patch: Partial<FeedFilters>) {
+    setFilters((current) => ({ ...current, ...patch }));
+    setPage(1);
   }
 
   function resetFilters() {
-    setSearch('');
-    setSeverityFilter('All');
-    setCountryFilter('All');
-    setReviewFilter('All');
-    setQuickFilter('All');
+    setFilters(DEFAULT_FEED_FILTERS);
+    setPage(1);
+  }
+
+  function resetOtherFiltersKeepWatchlist() {
+    setFilters({ ...DEFAULT_FEED_FILTERS, watchlistOnly: true });
+    setPage(1);
+  }
+
+  function selectItem(item: ViewItem) {
+    setSelectedId(item.id);
+    setSelectedCache(item);
+  }
+
+  function switchMode(mode: 'Demo' | 'Public web') {
+    setFeedMode(mode);
+    setPage(1);
+    setSelectedId('');
+    setSelectedCache(null);
+    setActionError('');
+  }
+
+  async function refreshPublic() {
+    setRefreshing(true);
+    try {
+      await fetch('/api/feed/public?refresh=true');
+    } catch {
+      // The item list below reports its own errors.
+    } finally {
+      setRefreshing(false);
+      feed.reload();
+      publicFeed.reload();
+    }
+  }
+
+  async function changePublicState(item: ViewItem, change: ItemStateChange) {
+    setPendingId(item.id);
+    setActionError('');
+    try {
+      const result = await saveItemState(item.id, change);
+      setSelectedId(item.id);
+      setSelectedCache(toViewItem(result.item));
+      publicFeed.reload();
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : 'Could not save the change.');
+    } finally {
+      setPendingId('');
+    }
+  }
+
+  function changeDemoState(item: ViewItem, patch: Partial<ViewItem>) {
+    setDemoItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, ...patch } : entry)));
+  }
+
+  function toggleReview(item: ViewItem) {
+    const next = item.reviewStatus === 'Reviewed' ? 'Unreviewed' : 'Reviewed';
+    if (isDemo) {
+      changeDemoState(item, { reviewStatus: next, reviewedAt: next === 'Reviewed' ? new Date().toISOString() : null });
+    } else {
+      void changePublicState(item, { reviewStatus: next });
+    }
+  }
+
+  function toggleWatchlist(item: ViewItem) {
+    if (isDemo) {
+      changeDemoState(item, { watchlisted: !item.watchlisted });
+    } else {
+      void changePublicState(item, { watchlisted: !item.watchlisted });
+    }
+  }
+
+  function overrideSeverity(item: ViewItem, value: Severity | null) {
+    if (isDemo) {
+      changeDemoState(item, {
+        severity: value ?? item.assessedSeverity,
+        severityOverridden: value !== null,
+        severityOverriddenAt: value !== null ? new Date().toISOString() : null,
+      });
+    } else {
+      void changePublicState(item, { severityOverride: value });
+    }
+  }
+
+  const needsReviewActive = !filters.watchlistOnly && filters.review === 'Unreviewed';
+  const allActive = !filters.watchlistOnly && !needsReviewActive;
+  const firstShown = total === 0 ? 0 : (currentPage - 1) * feedPageSize + 1;
+  const lastShown = isDemo ? total : Math.min(total, currentPage * feedPageSize);
+  const publicSources = feed.payload?.sources ?? [];
+  const publicFetchedAt = feed.payload?.fetchedAt ?? '';
+
+  let results;
+  if (error) {
+    results = (
+      <div className="feed-empty" role="alert">
+        <p>Could not load reports: {error}</p>
+        <button className="outline-button" onClick={publicFeed.reload}>Retry</button>
+      </div>
+    );
+  } else if (loading && items.length === 0) {
+    results = <div className="feed-empty" role="status">Loading reports...</div>;
+  } else if (items.length === 0 && filters.watchlistOnly && watchlistTotal === 0) {
+    results = (
+      <div className="feed-empty">
+        <p>Your watchlist is empty. Add reports using the watchlist button on each report.</p>
+        <button className="outline-button" onClick={() => updateFilters({ watchlistOnly: false })}>Show all reports</button>
+      </div>
+    );
+  } else if (items.length === 0 && filters.watchlistOnly) {
+    results = (
+      <div className="feed-empty">
+        <p>No watchlisted reports match your current filters.</p>
+        <div className="feed-empty-actions">
+          <button className="outline-button" onClick={resetOtherFiltersKeepWatchlist}>Reset filters</button>
+          <button className="ghost-button" onClick={() => updateFilters({ watchlistOnly: false })}>Show all reports</button>
+        </div>
+      </div>
+    );
+  } else if (items.length === 0 && datasetTotal === 0) {
+    results = <div className="feed-empty">No reports have been retrieved yet. They appear here after the first source check.</div>;
+  } else if (items.length === 0) {
+    results = (
+      <div className="feed-empty">
+        <p>No reports match these filters.</p>
+        <button className="outline-button" onClick={resetFilters}>Reset filters</button>
+      </div>
+    );
+  } else {
+    results = items.map((item) => {
+      const selected = selectedItem?.id === item.id;
+      const reviewed = item.reviewStatus === 'Reviewed';
+      return (
+        <article key={item.id} className={`feed-result ${selected ? 'selected' : ''}`}>
+          <button className="feed-result-main" onClick={() => selectItem(item)} aria-pressed={selected}>
+            <div className="feed-result-top">
+              <SeverityBadge severity={item.severity} manual={item.severityOverridden} />
+              <time dateTime={item.publishedAt}>{formatIsoDate(item.publishedAt)}</time>
+            </div>
+            <strong>{item.headline}</strong>
+            <p>{item.summary}</p>
+            <div className="feed-result-meta">
+              <span>{item.source}</span>
+              <span>{countryText(item)}</span>
+              <span>{item.reviewStatus}</span>
+              {item.watchlisted && <span>On watchlist</span>}
+            </div>
+          </button>
+          <div className="feed-result-actions">
+            <button
+              className="ghost-button small"
+              onClick={() => toggleReview(item)}
+              disabled={pendingId === item.id}
+              aria-pressed={reviewed}
+            >
+              {reviewed ? 'Mark as unreviewed' : 'Mark as reviewed'}
+            </button>
+            <button
+              className="ghost-button small"
+              onClick={() => toggleWatchlist(item)}
+              disabled={pendingId === item.id}
+              aria-pressed={item.watchlisted}
+            >
+              {item.watchlisted ? 'Remove from watchlist' : 'Add to watchlist'}
+            </button>
+          </div>
+        </article>
+      );
+    });
   }
 
   return (
     <div className="module-view">
       <div className="module-header">
         <div>
-          <div className="eyebrow">{feedMode === 'Demo' ? 'Demo dataset' : 'Publisher RSS / public web'}</div>
+          <div className="eyebrow">{isDemo ? 'Demo dataset' : 'Publisher RSS / public web'}</div>
           <h2>Intelligence feed</h2>
         </div>
         <div className="feed-heading-actions">
           <div className="feed-mode-switch" role="group" aria-label="Feed source mode">
             <button
-              className={feedMode === 'Demo' ? 'selected' : ''}
-              onClick={() => setFeedMode('Demo')}
-              aria-pressed={feedMode === 'Demo'}
+              className={isDemo ? 'selected' : ''}
+              onClick={() => switchMode('Demo')}
+              aria-pressed={isDemo}
             >
               Demo
             </button>
             <button
-              className={feedMode === 'Public web' ? 'selected' : ''}
-              onClick={() => void loadPublicFeed()}
-              aria-pressed={feedMode === 'Public web'}
-              disabled={loadingPublic}
+              className={!isDemo ? 'selected' : ''}
+              onClick={() => (isDemo ? switchMode('Public web') : void refreshPublic())}
+              aria-pressed={!isDemo}
+              disabled={refreshing}
             >
-              {loadingPublic ? 'Fetching...' : publicFetchedAt ? 'Refresh public' : 'Public web'}
+              {refreshing ? 'Fetching...' : isDemo ? 'Public web' : 'Refresh public'}
             </button>
           </div>
-          <span className="status-pill neutral">{filteredItems.length} of {activeItems.length} reports</span>
+          <span className="status-pill neutral" aria-live="polite">{total} of {datasetTotal} reports</span>
         </div>
       </div>
 
-      {feedMode === 'Public web' && (
+      {!isDemo && (
         <section className="public-feed-status" aria-live="polite">
           <div>
             <strong>Publisher-provided reporting</strong>
-            <span>Unreviewed items have no analyst-assigned severity, location, or confidence.</span>
+            <span>Severity and countries are automated estimates from each headline and summary. Verify the original article before acting.</span>
           </div>
-          {publicFetchedAt && <small>{publicFeedCached ? 'No new source content' : 'Latest successful source check'} / {formatIsoDate(publicFetchedAt)}</small>}
+          {publicFetchedAt && <small>{feed.payload?.cached ? 'No new source content' : 'Latest successful source check'} / {formatIsoDate(publicFetchedAt)}</small>}
           <div className="public-source-list">
             {publicSources.map((source) => (
               <span key={source.name} className={`source-health ${source.status}`}>
@@ -670,7 +883,7 @@ function IntelligenceFeedPanel() {
               </span>
             ))}
           </div>
-          {publicError && <p role="alert">{publicError}</p>}
+          {feed.error && <p role="alert">{feed.error}</p>}
         </section>
       )}
 
@@ -681,134 +894,165 @@ function IntelligenceFeedPanel() {
               <span className="sr-only">Search reports</span>
               <input
                 type="search"
-                placeholder="Search headlines, entities, locations..."
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search headlines, sources, countries..."
+                value={filters.search}
+                onChange={(event) => updateFilters({ search: event.target.value })}
               />
             </label>
             <label className="filter-select">
               <span>Severity</span>
-              <select value={severityFilter} onChange={(event) => setSeverityFilter(event.target.value)}>
-                <option>All</option>
-                <option>Critical</option>
-                <option>High</option>
-                <option>Moderate</option>
-                <option>Watch</option>
-                <option>Unassessed</option>
+              <select aria-label="Severity" value={filters.severity} onChange={(event) => updateFilters({ severity: event.target.value as FeedFilters['severity'] })}>
+                <option value="All">All severities</option>
+                {SEVERITIES.map((severity) => <option key={severity} value={severity}>{severity}</option>)}
               </select>
             </label>
             <label className="filter-select">
               <span>Country</span>
-              <select value={countryFilter} onChange={(event) => setCountryFilter(event.target.value)}>
-                <option>All</option>
-                {[...new Set(activeItems.map((item) => item.country))].sort().map((country) => (
-                  <option key={country}>{country}</option>
-                ))}
+              <select aria-label="Country" value={filters.country} onChange={(event) => updateFilters({ country: event.target.value })}>
+                <option value="All">All countries</option>
+                <optgroup label="Countries">
+                  {sortedCountries.map((country) => <option key={country.code} value={country.code}>{country.name}</option>)}
+                </optgroup>
+                <optgroup label="Not country-specific">
+                  <option value={GLOBAL_CODE}>Global (worldwide)</option>
+                  <option value={UNKNOWN_CODE}>Unknown location</option>
+                </optgroup>
               </select>
             </label>
             <label className="filter-select">
-              <span>Review</span>
-              <select value={reviewFilter} onChange={(event) => setReviewFilter(event.target.value)}>
-                <option>All</option>
-                {[...new Set(activeItems.map((item) => item.reviewStatus))].sort().map((status) => (
-                  <option key={status}>{status}</option>
-                ))}
+              <span>Reviewed</span>
+              <select aria-label="Reviewed" value={filters.review} onChange={(event) => updateFilters({ review: event.target.value as FeedFilters['review'] })}>
+                <option value="All">All items</option>
+                <option value="Reviewed">Reviewed</option>
+                <option value="Unreviewed">Unreviewed</option>
               </select>
             </label>
-            {hasFilters && <button className="ghost-button" onClick={resetFilters}>Reset</button>}
+            <button className="ghost-button" onClick={resetFilters} disabled={!filtersActive}>Reset filters</button>
           </div>
 
           <div className="feed-quick-filters" role="group" aria-label="Quick filters">
-            {(['All', 'Needs review', 'On watchlist'] as const).map((filter) => (
-              <button
-                key={filter}
-                className={quickFilter === filter ? 'selected' : ''}
-                onClick={() => setQuickFilter(filter)}
-                aria-pressed={quickFilter === filter}
-              >
-                {filter}
-              </button>
-            ))}
+            <button
+              className={allActive ? 'selected' : ''}
+              onClick={() => updateFilters({ watchlistOnly: false, review: filters.review === 'Unreviewed' ? 'All' : filters.review })}
+              aria-pressed={allActive}
+            >
+              All
+            </button>
+            <button
+              className={needsReviewActive ? 'selected' : ''}
+              onClick={() => updateFilters({ watchlistOnly: false, review: 'Unreviewed' })}
+              aria-pressed={needsReviewActive}
+            >
+              Needs review
+            </button>
+            <button
+              className={filters.watchlistOnly ? 'selected' : ''}
+              onClick={() => updateFilters({ watchlistOnly: true })}
+              aria-pressed={filters.watchlistOnly}
+            >
+              On watchlist{watchlistTotal > 0 ? ` (${watchlistTotal})` : ''}
+            </button>
           </div>
 
-          <div className="feed-results" aria-live="polite">
-            {filteredItems.length === 0 ? (
-              <div className="feed-empty">
-                {feedMode === 'Public web' && !publicFetchedAt && !publicError
-                  ? 'Load public sources to retrieve recent reports.'
-                  : 'No reports match these filters.'}
-              </div>
-            ) : filteredItems.map((item) => (
-              <button
-                key={item.id ?? item.headline}
-                className={`feed-result ${(selectedItem?.id ?? selectedItem?.headline) === (item.id ?? item.headline) ? 'selected' : ''}`}
-                onClick={() => setSelectedHeadline(item.id ?? item.headline)}
-                aria-pressed={(selectedItem?.id ?? selectedItem?.headline) === (item.id ?? item.headline)}
-              >
-                <div className="feed-result-top">
-                  <span className={`badge ${severityTone[item.severity as keyof typeof severityTone] ?? 'neutral'}`}>{item.severity}</span>
-                  <time dateTime={item.date}>{formatIsoDate(item.date)}</time>
-                </div>
-                <strong>{item.headline}</strong>
-                <p>{item.summary}</p>
-                <div className="feed-result-meta">
-                  <span>{item.source}</span>
-                  <span>{item.country} / {item.location}</span>
-                  <span>{item.reviewStatus}</span>
-                </div>
-              </button>
-            ))}
+          {filters.watchlistOnly && (
+            <div className="feed-watchlist-banner" role="status">
+              <span>Showing your watchlist only</span>
+              <button className="ghost-button small" onClick={() => updateFilters({ watchlistOnly: false })}>Show all reports</button>
+            </div>
+          )}
+          {actionError && <p className="feed-action-error" role="alert">{actionError}</p>}
+          {!error && total > 0 && (
+            <div className="feed-count-line" aria-live="polite">
+              Showing {firstShown}-{lastShown} of {total} matching reports
+            </div>
+          )}
+
+          <div className={`feed-results ${loading && items.length > 0 ? 'is-loading' : ''}`} aria-live="polite" aria-busy={loading}>
+            {results}
           </div>
+
+          {!error && totalPages > 1 && (
+            <nav className="feed-pager" aria-label="Report pages">
+              <button className="ghost-button small" onClick={() => setPage(Math.max(1, currentPage - 1))} disabled={currentPage <= 1}>Previous</button>
+              <span>Page {currentPage} of {totalPages}</span>
+              <button className="ghost-button small" onClick={() => setPage(Math.min(totalPages, currentPage + 1))} disabled={currentPage >= totalPages}>Next</button>
+            </nav>
+          )}
         </section>
 
         {selectedItem ? (
           <aside className="panel feed-detail" aria-label="Selected report details">
             <div className="panel-header">
-              <span className={`badge ${severityTone[selectedItem.severity as keyof typeof severityTone] ?? 'neutral'}`}>{selectedItem.severity}</span>
+              <SeverityBadge severity={selectedItem.severity} manual={selectedItem.severityOverridden} />
               <span className="status-pill neutral">{selectedItem.reviewStatus}</span>
             </div>
             <h3>{selectedItem.headline}</h3>
             <p className="feed-detail-summary">{selectedItem.summary}</p>
 
+            <div className="severity-panel">
+              <strong>Severity assessment</strong>
+              <p>{selectedItem.severityRationale}</p>
+              {selectedItem.severityOverridden && (
+                <p className="severity-override-note">
+                  Set manually{selectedItem.severityOverriddenAt ? ` on ${formatIsoDate(selectedItem.severityOverriddenAt)}` : ''}.
+                  Automatic assessment: {selectedItem.assessedSeverity}.
+                </p>
+              )}
+              <label className="filter-select">
+                <span>Correct severity</span>
+                <select
+                  aria-label="Correct severity"
+                  value={selectedItem.severityOverridden ? selectedItem.severity : ''}
+                  disabled={pendingId === selectedItem.id}
+                  onChange={(event) => overrideSeverity(selectedItem, event.target.value === '' ? null : event.target.value as Severity)}
+                >
+                  <option value="">Automatic ({selectedItem.assessedSeverity})</option>
+                  {SEVERITIES.map((severity) => <option key={severity} value={severity}>{severity}</option>)}
+                </select>
+              </label>
+            </div>
+
             <dl className="feed-facts">
               <div><dt>Source</dt><dd>{selectedItem.source}</dd></div>
               <div><dt>Source type</dt><dd>{selectedItem.sourceType}</dd></div>
-              <div><dt>Published</dt><dd>{formatIsoDate(selectedItem.date)}</dd></div>
+              <div><dt>Published</dt><dd>{formatIsoDate(selectedItem.publishedAt)}</dd></div>
               {selectedItem.sourceModifiedAt && <div><dt>Source modified</dt><dd>{formatIsoDate(selectedItem.sourceModifiedAt)}</dd></div>}
-              {selectedItem.retrievedAt && <div><dt>Retrieved by app</dt><dd>{formatIsoDate(selectedItem.retrievedAt)}</dd></div>}
-              {selectedItem.lastCheckedAt && <div><dt>Source last checked</dt><dd>{formatIsoDate(selectedItem.lastCheckedAt)}</dd></div>}
-              <div><dt>Country / region</dt><dd>{selectedItem.country} / {selectedItem.region}</dd></div>
-              <div><dt>Location</dt><dd>{selectedItem.location}</dd></div>
-              <div><dt>Category</dt><dd>{selectedItem.type}</dd></div>
+              {!isDemo && <div><dt>Retrieved by app</dt><dd>{formatIsoDate(selectedItem.retrievedAt)}</dd></div>}
+              {!isDemo && <div><dt>Source last checked</dt><dd>{formatIsoDate(selectedItem.lastCheckedAt)}</dd></div>}
+              <div><dt>Countries</dt><dd>{selectedItem.countries.map((country) => country.name).join(', ')}</dd></div>
+              {selectedItem.location && <div><dt>Location</dt><dd>{selectedItem.location}</dd></div>}
+              <div><dt>Category</dt><dd>{selectedItem.categoryLabels.length > 0 ? selectedItem.categoryLabels.join(', ') : 'None detected'}</dd></div>
               <div><dt>Reliability</dt><dd>{selectedItem.reliability}</dd></div>
-              <div><dt>Assessment confidence</dt><dd>{selectedItem.confidence}</dd></div>
-              <div><dt>Entities</dt><dd>{selectedItem.entities}</dd></div>
-              <div><dt>Relevance</dt><dd>{selectedItem.relevance}</dd></div>
+              <div><dt>Assessment confidence</dt><dd>{selectedItem.assessmentConfidence}</dd></div>
+              {selectedItem.entities && <div><dt>Entities</dt><dd>{selectedItem.entities}</dd></div>}
+              {selectedItem.relevance && <div><dt>Relevance</dt><dd>{selectedItem.relevance}</dd></div>}
+              {selectedItem.reviewedAt && <div><dt>Reviewed</dt><dd>{formatIsoDate(selectedItem.reviewedAt)}{selectedItem.reviewedBy ? ` by ${selectedItem.reviewedBy}` : ''}</dd></div>}
+              {selectedItem.watchlistedAt && <div><dt>Added to watchlist</dt><dd>{formatIsoDate(selectedItem.watchlistedAt)}</dd></div>}
             </dl>
 
             <div className="feed-detail-actions">
               <button
                 className="outline-button"
-                onClick={() => updateSelectedItem({
-                  reviewStatus: selectedItem.reviewStatus === 'Reviewed' ? 'Needs review' : 'Reviewed',
-                })}
+                onClick={() => toggleReview(selectedItem)}
+                disabled={pendingId === selectedItem.id}
               >
-                {selectedItem.reviewStatus === 'Reviewed' ? 'Reopen review' : 'Mark reviewed'}
+                {selectedItem.reviewStatus === 'Reviewed' ? 'Mark as unreviewed' : 'Mark as reviewed'}
               </button>
               <button
                 className="ghost-button"
-                onClick={() => updateSelectedItem({ watchlist: !selectedItem.watchlist })}
-                aria-pressed={selectedItem.watchlist}
+                onClick={() => toggleWatchlist(selectedItem)}
+                disabled={pendingId === selectedItem.id}
+                aria-pressed={selectedItem.watchlisted}
               >
-                {selectedItem.watchlist ? 'Remove from watchlist' : 'Add to watchlist'}
+                {selectedItem.watchlisted ? 'Remove from watchlist' : 'Add to watchlist'}
               </button>
             </div>
             <a className="source-link" href={selectedItem.url} target="_blank" rel="noreferrer">Open publisher article</a>
             {selectedItem.sourceUrl && <a className="source-link" href={selectedItem.sourceUrl} target="_blank" rel="noreferrer">View publisher feed</a>}
             <p className="muted-note">
-              {feedMode === 'Demo'
+              {isDemo
                 ? 'Demo content for workflow testing. Source links are placeholders; verify reports before acting.'
-                : 'Publisher-provided headline and summary. This is not an assessed alert; verify the original article and corroborate independently.'}
+                : 'Publisher-provided headline and summary. Severity is a rules-based estimate (impact, scope, urgency, source, corroboration), not an analyst judgement; your corrections are kept when the feed updates. Confidence reflects how much explicit evidence the text gives, not whether the report is true. Review, watchlist and severity choices are saved for this browser.'}
             </p>
           </aside>
         ) : (
@@ -1579,7 +1823,7 @@ function App() {
         </header>
 
         {activeView === 'Overview' && <OverviewPanel feed={feed} />}
-        {activeView === 'Intelligence Feed' && <IntelligenceFeedPanel />}
+        {activeView === 'Intelligence Feed' && <IntelligenceFeedPanel feed={feed} />}
         {activeView === 'Threat Indicators' && <ThreatIndicatorsPanel />}
         {activeView === 'Incidents' && <IncidentDetailPanel />}
         {activeView === 'Country Assessments' && <CountryAssessmentPanel />}
