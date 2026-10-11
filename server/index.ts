@@ -14,7 +14,11 @@ import {
   priorityIntelligence,
   trendData,
 } from '../src/data/demo';
+import { z } from 'zod';
 import { fetchRssSource, SourceFetchError } from './rss';
+import { buildFeedPage, ensureAssessments, updateItemState } from './feed-service';
+import { isKnownCountryCode } from '../src/data/countries';
+import { REVIEW_STATUSES, SEVERITIES, type FeedFilters } from '../src/data/feedTypes';
 import { SourceStore, type SourceDefinition, type StoredArticle, type SyncState } from './source-store';
 
 dotenv.config();
@@ -313,6 +317,85 @@ app.get('/api/countries', (_req: Request, res: Response) => {
   res.json({ items: countryAssessments, total: countryAssessments.length });
 });
 
+const clientIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/);
+
+function requireClientId(req: Request, res: Response): string | null {
+  const parsed = clientIdSchema.safeParse(req.header('x-client-id'));
+  if (!parsed.success) {
+    res.status(400).json({ error: 'A valid X-Client-Id header is required.' });
+    return null;
+  }
+  return parsed.data;
+}
+
+const feedQuerySchema = z.object({
+  severity: z.enum(['All', ...SEVERITIES] as const).default('All'),
+  country: z.string().refine((value) => value === 'All' || isKnownCountryCode(value), 'Unknown country code.').default('All'),
+  review: z.enum(['All', ...REVIEW_STATUSES] as const).default('All'),
+  watchlist: z.enum(['true', 'false']).default('false'),
+  q: z.string().max(200).default(''),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(5).max(100).default(20),
+});
+
+const feedStateSchema = z.object({
+  articleId: z.string().min(1).max(2048),
+  reviewStatus: z.enum(REVIEW_STATUSES).optional(),
+  watchlisted: z.boolean().optional(),
+  severityOverride: z.enum(SEVERITIES).nullable().optional(),
+}).refine(
+  (value) => value.reviewStatus !== undefined || value.watchlisted !== undefined || value.severityOverride !== undefined,
+  { message: 'Provide at least one field to change.' },
+);
+
+app.get('/api/feed/items', (req: Request, res: Response) => {
+  const clientId = requireClientId(req, res);
+  if (!clientId) return;
+  const parsed = feedQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ') });
+    return;
+  }
+  const query = parsed.data;
+  const filters: FeedFilters = {
+    severity: query.severity,
+    country: query.country,
+    review: query.review,
+    watchlistOnly: query.watchlist === 'true',
+    search: query.q,
+  };
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json(buildFeedPage(sourceStore, clientId, filters, query.page, query.pageSize));
+  } catch (error) {
+    console.error('Could not build feed page', error);
+    res.status(500).json({ error: 'Could not read the stored reports.' });
+  }
+});
+
+app.patch('/api/feed/state', (req: Request, res: Response) => {
+  const clientId = requireClientId(req, res);
+  if (!clientId) return;
+  const parsed = feedStateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues.map((issue) => issue.message).join('; ') });
+    return;
+  }
+  const { articleId, ...patch } = parsed.data;
+  try {
+    const result = updateItemState(sourceStore, clientId, articleId, patch);
+    if (!result) {
+      res.status(404).json({ error: 'Report not found.' });
+      return;
+    }
+    res.set('Cache-Control', 'no-store');
+    res.json(result);
+  } catch (error) {
+    console.error('Could not save report state', error);
+    res.status(500).json({ error: 'Could not save the change.' });
+  }
+});
+
 const distDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '../dist');
 if (process.env.NODE_ENV === 'production' && existsSync(distDirectory)) {
   app.use(express.static(distDirectory, { index: false, maxAge: '1h' }));
@@ -330,6 +413,7 @@ function startBackgroundSync() {
 if (process.env.NODE_ENV !== 'test') {
   const server = app.listen(port, () => {
     console.log(`Global Security Intelligence API listening on http://localhost:${port}`);
+    ensureAssessments(sourceStore);
     startBackgroundSync();
   });
 
