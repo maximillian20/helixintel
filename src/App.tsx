@@ -1199,7 +1199,7 @@ function SourcesPanel() {
       <div className="module-header">
         <div>
           <div className="eyebrow">Provider registry / public connectors</div>
-          <h2>Sources</h2>
+          <h2>Data sources</h2>
         </div>
         <button className="outline-button" onClick={() => void loadSources(true)} disabled={loading}>
           {loading ? 'Checking feeds...' : 'Check feeds'}
