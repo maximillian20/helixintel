@@ -2369,7 +2369,7 @@ input[type="date"] { color-scheme: dark; background: rgba(15, 23, 42, 0.7); colo
 .cn-edge.on { stroke: #7dd3fc; stroke-width: 2.2; }
 .cn-edge.off { opacity: 0.18; }
 .cn-node { position: absolute; display: grid; align-content: center; gap: 2px; padding: 8px 12px; text-align: left; border: 1px solid var(--border); border-left: 4px solid #475569; border-radius: 10px; background: rgba(15, 23, 42, 0.92); color: var(--text); font: inherit; cursor: pointer; overflow: hidden; }
-.cn-node strong { font-size: 0.86rem; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.cn-node strong { font-size: 0.86rem; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .cn-node small { color: var(--muted); font-size: 0.74rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cn-node.selected { border-color: #7dd3fc; box-shadow: 0 0 0 2px rgba(125, 211, 252, 0.35); }
 .cn-node.dim { opacity: 0.35; }
