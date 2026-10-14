@@ -631,6 +631,12 @@ function SeverityBadge({ severity, manual }: { severity: string; manual?: boolea
   );
 }
 
+/** Display only: drops bare web addresses (video descriptions are full of them) and keeps the text readable. */
+function shortSummary(text: string, max = 320) {
+  const clean = text.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
+  return clean.length > max ? `${clean.slice(0, max).replace(/\s+\S*$/, '')}…` : clean;
+}
+
 function toViewItem(item: FeedItemDto): ViewItem {
   return { ...item, sourceType: 'Publisher RSS', reliability: 'Not assessed' };
 }
@@ -857,16 +863,16 @@ function IntelligenceFeedPanel({ feed, onNavigate, focusId }: { feed: PublicFeed
       const selected = selectedItem?.id === item.id;
       const reviewed = item.reviewStatus === 'Reviewed';
       return (
-        <article key={item.id} className={`feed-result ${selected ? 'selected' : ''}`}>
+        <article key={item.id} className={`feed-result ${selected ? 'selected' : ''}`} data-sev={item.severity.toLowerCase()}>
           <button className="feed-result-main" onClick={() => selectItem(item)} aria-pressed={selected}>
             <div className="feed-result-top">
               <SeverityBadge severity={item.severity} manual={item.severityOverridden} />
               <time dateTime={item.publishedAt}>{formatIsoDate(item.publishedAt)}</time>
             </div>
             <strong>{item.headline}</strong>
-            <p>{item.summary}</p>
+            <p>{shortSummary(item.summary)}</p>
             <div className="feed-result-meta">
-              <span>{item.source}</span>
+              <span className="feed-source"><i className="feed-avatar" aria-hidden="true">{item.source.trim().charAt(0).toUpperCase()}</i>{item.source}</span>
               {item.category && <span>{item.category}</span>}
               <span>{countryText(item)}</span>
               <span>{item.reviewStatus}</span>
@@ -920,14 +926,21 @@ function IntelligenceFeedPanel({ feed, onNavigate, focusId }: { feed: PublicFeed
             <span>Severity and countries are automated estimates from each headline and summary. Verify the original article before acting.</span>
           </div>
           {publicFetchedAt && <small>{feed.payload?.cached ? 'No new source content' : 'Latest successful source check'} / {formatIsoDate(publicFetchedAt)}</small>}
-          <div className="public-source-list">
-            {publicSources.map((source) => (
-              <span key={source.name} className={`source-health ${source.status}`}>
-                {source.name}: {source.status} / {source.itemCount} stored
-                {source.lastError ? ` / ${source.lastError}` : ''}
-              </span>
-            ))}
-          </div>
+          <details className="public-source-details">
+            <summary>
+              <span className="health-dots" aria-hidden="true">{publicSources.map((source) => <i key={source.name} className={`hd ${source.status}`} />)}</span>
+              {publicSources.filter((source) => source.status === 'healthy').length} of {publicSources.length} sources healthy
+              <em>Show sources</em>
+            </summary>
+            <div className="public-source-list">
+              {publicSources.map((source) => (
+                <span key={source.name} className={`source-health ${source.status}`}>
+                  {source.name}: {source.status} / {source.itemCount} stored
+                  {source.lastError ? ` / ${source.lastError}` : ''}
+                </span>
+              ))}
+            </div>
+          </details>
           {feed.error && <p role="alert">{feed.error}</p>}
         </section>
       )}
@@ -1032,7 +1045,7 @@ function IntelligenceFeedPanel({ feed, onNavigate, focusId }: { feed: PublicFeed
               <span className="status-pill neutral">{selectedItem.reviewStatus}</span>
             </div>
             <h3>{selectedItem.headline}</h3>
-            <p className="feed-detail-summary">{selectedItem.summary}</p>
+            <p className="feed-detail-summary">{shortSummary(selectedItem.summary, 900)}</p>
 
             <div className="severity-panel">
               <strong>Severity assessment</strong>
