@@ -41,6 +41,16 @@ Environment variables: see `.env.example`. Set `SOURCE_DB_PATH` to a persistent 
 | ReliefWeb | Free, needs a pre-approved app name (https://apidoc.reliefweb.int/) | `RELIEFWEB_APPNAME` |
 | US EIA oil spot prices | Free key (https://www.eia.gov/opendata/register.php) | `EIA_API_KEY` |
 
+### Extra feeds (including YouTube channels)
+
+The site administrator can add up to 12 more RSS or Atom feeds with the `EXTRA_FEEDS` server setting, a JSON list:
+
+```
+[{"name":"Al Jazeera English (YouTube)","url":"https://www.youtube.com/feeds/videos.xml?channel_id=UCNye-wNBqNL5ZzHSJj3l8Bg"}]
+```
+
+A YouTube channel's feed address is `https://www.youtube.com/feeds/videos.xml?channel_id=<channel id>`. Each video appears as a report with its title, description and link; the video itself is not analysed, so severity is often "Unassessed". Only https addresses on public hosts are accepted, and visitors cannot add feeds, so the server never fetches an address a stranger chose. Problems with an entry are written to the server log, and each feed shows its own status on the Sources page. TikTok and Instagram are not supported: they offer no open public access.
+
 Credentials are read only on the server. A source without its credential is shown as "Setup required" on the Sources page and is never called.
 Fast sources are checked every 15 minutes (`SOURCE_POLL_INTERVAL_MS`), CISA every 6 hours, ReliefWeb hourly, EIA every 12 hours.
 
