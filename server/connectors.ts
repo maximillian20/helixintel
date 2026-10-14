@@ -535,7 +535,12 @@ export async function fetchSource(source: SourceDefinition, context: ConnectorCo
     case 'gdelt': {
       const query = env.GDELT_QUERY?.trim() || defaultGdeltQuery;
       const url = `${source.url}?${new URLSearchParams({ query, mode: 'artlist', format: 'json', maxrecords: '75', timespan: '1h', sort: 'datedesc' })}`;
-      const response = await httpText(url, { fetcher, headers: { accept: 'application/json' }, attempts: 2 });
+      // One try per run: GDELT allows one request every 5 seconds, so a quick retry would only break its rule. The next scheduled check is the retry.
+      const response = await httpText(url, { fetcher, headers: { accept: 'application/json' }, attempts: 1 })
+        .catch((error: unknown) => {
+          if (error instanceof SourceFetchError && /HTTP 429/.test(error.message)) throw new SourceFetchError('GDELT asked us to slow down (it allows one request every 5 seconds across everyone using the same network address). The next scheduled check tries again.');
+          throw error;
+        });
       return { articles: parseGdelt(response.text) };
     }
     case 'reliefweb': {
