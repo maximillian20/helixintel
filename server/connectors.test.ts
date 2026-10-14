@@ -87,7 +87,7 @@ test('network errors are retried with backoff, then reported; HTTP 429 carries R
 test('registry: source ids are unique and every source names its publisher terms', () => {
   const sources = buildSources(900_000);
   assert.equal(new Set(sources.map((source) => source.id)).size, sources.length);
-  for (const id of ['aljazeera', 'guardian-world', 'uk-fcdo-travel']) {
+  for (const id of ['aljazeera', 'guardian-world', 'who-news', 'uk-fcdo-travel']) {
     const source = sources.find((candidate) => candidate.id === id);
     assert.ok(source, id);
     assert.match(source!.url, /^https:\/\//);

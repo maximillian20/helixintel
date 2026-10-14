@@ -351,6 +351,11 @@ export function buildSources(pollIntervalMs: number): SourceDefinition[] {
       attribution: 'The Guardian', termsUrl: 'https://www.theguardian.com/help/terms-of-service', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs,
     },
     {
+      id: 'who-news', name: 'WHO News', url: 'https://www.who.int/rss-feeds/news-english.xml', format: 'RSS 2.0',
+      coverage: 'Official World Health Organization news and statements, including public-health emergencies and outbreak updates', cadence: `${fast}; 15-minute article cache`,
+      attribution: 'World Health Organization', termsUrl: 'https://www.who.int/about/policies/terms-of-use', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs,
+    },
+    {
       id: 'uk-fcdo-travel', name: 'UK Foreign Office travel advice', url: 'https://www.gov.uk/foreign-travel-advice.atom', format: 'Atom',
       coverage: 'Official UK government travel advice updates by country (security, entry rules and local risks)', cadence: `${fast}; 15-minute article cache`,
       attribution: 'UK Foreign, Commonwealth & Development Office', termsUrl: 'https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs,
