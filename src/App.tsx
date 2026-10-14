@@ -53,7 +53,6 @@ const navItems = [
   'SIBs',
   'Map',
   'Watchlists',
-  'Reports',
   'Sources',
   'Settings',
 ] as const;
