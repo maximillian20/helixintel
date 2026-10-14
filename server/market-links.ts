@@ -157,6 +157,22 @@ export function suggestLinks(input: LinkInput, max = 24): LinkSuggestion[] {
     });
   }
 
+  // 4. Bitcoin as 24/7 market context for severe geopolitical or cyber events. Crypto trades around the clock, so the price
+  //    around an event can be read even outside stock-market hours. It is context, never a claimed exposure.
+  const severe = input.severity === 'Critical' || (input.severity === 'High' && ['conflict', 'political', 'cyber'].includes(category));
+  if (severe) {
+    const btc = catalogById.get('crypto:BTC-USD:COINBASE');
+    if (btc) put(btc, {
+      ruleId: 'broad-market-crypto', relevance: 'Broad market',
+      explanation: {
+        ruleId: 'broad-market-crypto', relevance: 'Broad market',
+        basis: `The event is rated ${input.severity}${category !== 'other' ? ` and its category is "${category}"` : ''}. Bitcoin is shown only as general market context, not as a specific exposure.`,
+        pathway: 'Very severe events can change overall risk appetite. Bitcoin trades 24 hours a day, so its price can be read around the event even when stock markets are closed.',
+        alternatives: ['Bitcoin is driven by many factors unrelated to world events (flows, leverage, regulation, its own news).', ...COMMON_ALTERNATIVES],
+      },
+    });
+  }
+
   return [...out.values()].sort((a, b) => RANK[a.relevance] - RANK[b.relevance]).slice(0, max);
 }
 

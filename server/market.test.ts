@@ -223,6 +223,10 @@ test('link suggestions explain themselves and separate direct, sector and broad-
   assert.ok(shell.includes('stock:SHEL:XNYS') && shell.includes('stock:SHEL:XLON'));
   // Broad-market context only for Critical events.
   assert.ok(suggestLinks({ text: 'x', categories: [], countries: [], severity: 'Critical' }).some((s) => s.relevance === 'Broad market'));
+  const btcOf = (severity: string, categories: string[]) => suggestLinks({ text: 'x', categories, countries: [], severity }).some((s) => s.assetId === 'crypto:BTC-USD:COINBASE');
+  assert.ok(btcOf('Critical', []), 'Critical events get Bitcoin as 24/7 market context');
+  assert.ok(btcOf('High', ['armed-attack']), 'High conflict events get Bitcoin as market context');
+  assert.ok(!btcOf('High', ['famine']) && !btcOf('Medium', ['armed-attack']), 'other events do not');
   assert.ok(!suggestLinks({ text: 'x', categories: [], countries: [], severity: 'High' }).some((s) => s.relevance === 'Broad market'));
   const cyber = suggestLinks({ text: 'Ransomware attack on hospital network', categories: ['cyber'], countries: [], severity: 'Medium' });
   assert.ok(cyber.some((s) => s.assetId === 'stock:CRWD:XNAS'));
