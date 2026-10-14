@@ -23,7 +23,7 @@ const DEFAULT_FILTERS: MapFilters = { country: '', category: '', severity: 'All'
 const DEFAULT_LAYERS: Record<LayerId, boolean> = {
   reports: true, gdelt: true, reliefweb: true, gdacs: true, usgs: true, eonet: true, incidents: true, places: true, countries: false, aircraft: false,
 };
-const DEFAULT_UI = { tab: 'results' as 'results' | 'places', layersOpen: true, legendCollapsed: true, panelOpen: true };
+const DEFAULT_UI = { tab: 'results' as 'results' | 'places', layersOpen: typeof window === 'undefined' || window.innerWidth > 680, legendCollapsed: true, panelOpen: true };
 const countryOptions = sortedCountries.filter((c) => c.code !== 'GLOBAL' && c.code !== 'UNKNOWN');
 const CLUSTER_STOP_ZOOM = 16;
 const WORLD_BOUNDS: L.LatLngBoundsLiteral = [[-55, -170], [75, 170]];
