@@ -887,7 +887,7 @@ function IntelligenceFeedPanel({ feed, onNavigate, focusId }: { feed: PublicFeed
       <div className="module-header">
         <div>
           <div className="eyebrow">Connected public sources</div>
-          <h2>Intelligence feed</h2>
+          <h2>Latest reports</h2>
         </div>
         <div className="feed-heading-actions">
           <button className="outline-button" onClick={() => void refreshPublic()} disabled={refreshing}>
@@ -923,7 +923,7 @@ function IntelligenceFeedPanel({ feed, onNavigate, focusId }: { feed: PublicFeed
               <span className="sr-only">Search reports</span>
               <input
                 type="search"
-                placeholder="Search headlines, sources, countries..."
+                placeholder="Search reports…"
                 value={filters.search}
                 onChange={(event) => updateFilters({ search: event.target.value })}
               />
@@ -1319,6 +1319,7 @@ function SourcesPanel() {
 
 function App() {
   const [activeView, setActiveView] = useState<(typeof navItems)[number]>('Overview');
+  useEffect(() => { document.title = `${activeView} · Global Security Intelligence`; }, [activeView]);
   const [focusId, setFocusId] = useState<string | undefined>(undefined);
   const navigate: Navigate = useCallback((view, id) => {
     setActiveView(view);
@@ -1335,6 +1336,7 @@ function App() {
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main">Skip to content</a>
       <aside className="sidebar">
         <div className="brand-block">
           <div className="brand-mark">GSI</div>
@@ -1347,34 +1349,30 @@ function App() {
           <p className="nav-label">Operations</p>
           <ul>
             {navItems.map((item) => (
-              <li
-                key={item}
-                className={activeView === item ? 'active' : ''}
-                onClick={() => { setActiveView(item); setFocusId(undefined); }}
-              >
-                {item}
+              <li key={item} className={activeView === item ? 'active' : ''}>
+                <button type="button" aria-current={activeView === item ? 'page' : undefined} onClick={() => { setActiveView(item); setFocusId(undefined); }}>
+                  {item}
+                </button>
               </li>
             ))}
           </ul>
         </nav>
       </aside>
 
-      <main className="main-panel">
+      <main className="main-panel" id="main">
         <header className="topbar">
           <div className="header-left">
             <div>
               <div className="eyebrow">Operational picture</div>
               <h2>{activeView}</h2>
             </div>
-            <button className="outline-button">Last refresh: {feed.payload?.fetchedAt ? relativeTime(feed.payload.fetchedAt, clock) : 'pending'}</button>
+            <span className="refresh-chip">Last refresh: {feed.payload?.fetchedAt ? relativeTime(feed.payload.fetchedAt, clock) : 'pending'}</span>
           </div>
 
           <div className="header-actions">
-            <div className="search-box">Search incidents, sources, countries…</div>
             <div className={`status-pill ${feedLive ? 'success' : 'neutral'}`}>{feedLive ? 'Public feeds live' : 'Public feeds connecting'}</div>
             <AlertsBell onNavigate={navigate} />
             <AnalystMenu />
-            <div className="theme-toggle">☾</div>
           </div>
         </header>
 
