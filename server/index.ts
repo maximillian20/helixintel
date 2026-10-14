@@ -23,6 +23,7 @@ import { PlaceStore, evaluatePlaceAlerts } from './map-service';
 import { SibStore } from './sib-store';
 import { registerSibRoutes } from './sib-routes';
 import { registerWatchlistRoutes } from './watchlist-routes';
+import { registerConnectionsRoutes } from './connections-routes';
 import { runMarketSync } from './market-sync';
 import { captureReportSnapshots, clearEventCache, evaluateMarketAlerts } from './market-service';
 import { SourceStore, type SourceDefinition, type StoredArticle, type SyncState } from './source-store';
@@ -466,6 +467,7 @@ registerMarketRoutes({
 
 registerSibRoutes({ app, analysis: analysisStore, sibs: sibStore, requireClientId, publish: publishEvent });
 registerWatchlistRoutes({ app, analysis: analysisStore, places: placeStore, requireClientId });
+registerConnectionsRoutes({ app, analysis: analysisStore, sibs: sibStore, requireClientId });
 
 registerMapRoutes({
   app, store: sourceStore, analysis: analysisStore, geo: geoStore, places: placeStore, adsb: adsbClient, requireClientId, publish: publishEvent,
