@@ -7,7 +7,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { SourceFetchError } from './rss';
-import { buildSources, fetchSource, missingCredentials } from './connectors';
+import { buildSources, fetchSource, missingCredentials, parseExtraFeeds } from './connectors';
 import { buildFeedPage, buildOverview, ensureAssessments, updateItemState } from './feed-service';
 import { isKnownCountryCode } from '../src/data/countries';
 import { REVIEW_STATUSES, SEVERITIES, type FeedFilters } from '../src/data/feedTypes';
@@ -41,6 +41,7 @@ const pollIntervalMs = Math.min(
 const maxRetryDelayMs = 6 * 60 * 60 * 1000;
 const manualCheckCooldownMs = 60 * 1000;
 const publicSources: SourceDefinition[] = buildSources(pollIntervalMs);
+for (const problem of parseExtraFeeds(process.env.EXTRA_FEEDS, pollIntervalMs).problems) console.warn(problem);
 
 const sourceStore = new SourceStore();
 sourceStore.cleanStoredText();

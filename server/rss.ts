@@ -87,7 +87,8 @@ export function parseRssArticles(xml: string, source: SourceDefinition): Normali
 
   return (entries as Array<Record<string, unknown>>).flatMap((entry) => {
     const headline = plainText(textValue(entry.title)).slice(0, 500);
-    const summary = plainText(textValue(entry.description ?? entry.summary ?? entry.content)).slice(0, 4000);
+    const mediaGroup = entry['media:group'] as Record<string, unknown> | undefined;
+    const summary = plainText(textValue(entry.description ?? entry.summary ?? entry.content ?? mediaGroup?.['media:description'])).slice(0, 4000);
     const rawUrl = linkValue(entry.link) || textValue(entry.guid ?? entry.id);
     const publishedAt = dateValue(entry.pubDate, entry.published, entry.date, entry.updated);
     if (!headline || !rawUrl || !publishedAt) return [];

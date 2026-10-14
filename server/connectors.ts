@@ -325,7 +325,58 @@ export function parseEia(text: string): NormalizedArticle[] {
 
 // ---------------------------------------------------------------- registry
 
-export function buildSources(pollIntervalMs: number): SourceDefinition[] {
+const MAX_EXTRA_FEEDS = 12;
+
+function isPrivateHost(hostname: string) {
+  const host = hostname.toLowerCase();
+  return host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal') || !host.includes('.')
+    || /^(127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.)/.test(host) || host.startsWith('[');
+}
+
+/**
+ * Extra feeds the site administrator lists in the EXTRA_FEEDS setting, as JSON: [{"name":"...","url":"https://..."}].
+ * They are read like any other RSS/Atom feed (YouTube channel feeds work: https://www.youtube.com/feeds/videos.xml?channel_id=...).
+ * Visitors cannot add feeds; only the server setting can, so the server never fetches an address a stranger chose.
+ */
+export function parseExtraFeeds(raw: string | undefined, pollIntervalMs: number): { sources: SourceDefinition[]; problems: string[] } {
+  const problems: string[] = [];
+  if (!raw || !raw.trim()) return { sources: [], problems };
+  let list: unknown;
+  try { list = JSON.parse(raw); } catch { return { sources: [], problems: ['EXTRA_FEEDS is not valid JSON; no extra feeds were added.'] }; }
+  if (!Array.isArray(list)) return { sources: [], problems: ['EXTRA_FEEDS must be a JSON list; no extra feeds were added.'] };
+  const minutes = Math.round(pollIntervalMs / 60000);
+  const sources: SourceDefinition[] = [];
+  const seen = new Set<string>();
+  for (const [index, entry] of list.entries()) {
+    if (sources.length >= MAX_EXTRA_FEEDS) { problems.push(`Only the first ${MAX_EXTRA_FEEDS} extra feeds are used.`); break; }
+    const name = typeof (entry as { name?: unknown })?.name === 'string' ? (entry as { name: string }).name.trim().slice(0, 60) : '';
+    const url = typeof (entry as { url?: unknown })?.url === 'string' ? (entry as { url: string }).url.trim() : '';
+    let parsed: URL | null = null;
+    try { parsed = new URL(url); } catch { parsed = null; }
+    if (!name || !parsed || parsed.protocol !== 'https:' || parsed.username || parsed.password || isPrivateHost(parsed.hostname)) {
+      problems.push(`Extra feed #${index + 1} was skipped: it needs a name and a public https address.`);
+      continue;
+    }
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || `feed-${index + 1}`;
+    let id = `extra-${slug}`;
+    for (let n = 2; seen.has(id); n += 1) id = `extra-${slug}-${n}`;
+    seen.add(id);
+    const youtube = parsed.hostname.endsWith('youtube.com');
+    sources.push({
+      id, name, url: parsed.toString(), format: youtube ? 'Atom (YouTube channel)' : 'RSS / Atom',
+      coverage: youtube ? 'Videos published by this YouTube channel (titles and descriptions only; video content is not analysed)' : 'Feed added by the site administrator',
+      cadence: `${minutes}-minute polling; 15-minute article cache`,
+      attribution: name, termsUrl: youtube ? 'https://www.youtube.com/t/terms' : parsed.origin, connector: 'rss', kind: 'news', intervalMs: pollIntervalMs,
+    });
+  }
+  return { sources, problems };
+}
+
+export function buildSources(pollIntervalMs: number, env: NodeJS.ProcessEnv = process.env): SourceDefinition[] {
+  return [...buildBuiltInSources(pollIntervalMs), ...parseExtraFeeds(env.EXTRA_FEEDS, pollIntervalMs).sources];
+}
+
+function buildBuiltInSources(pollIntervalMs: number): SourceDefinition[] {
   const minutes = Math.round(pollIntervalMs / 60000);
   const fast = `${minutes}-minute polling`;
   return [

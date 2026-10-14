@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { eiaJson, gdacsXml, gdeltJson, kevJson, reliefWebJson } from './fixtures';
-import { buildSources, fetchSource, missingCredentials, parseEia, parseGdacs, parseGdelt, parseKev, parseReliefWeb } from './connectors';
+import { parseExtraFeeds, buildSources, fetchSource, missingCredentials, parseEia, parseGdacs, parseGdelt, parseKev, parseReliefWeb } from './connectors';
 import { SourceFetchError } from './rss';
 
 const now = new Date('2026-10-11T08:00:00Z');
@@ -94,4 +94,27 @@ test('registry: source ids are unique and every source names its publisher terms
     assert.match(source!.termsUrl, /^https:\/\//);
     assert.equal(source!.connector, 'rss');
   }
+});
+
+test('EXTRA_FEEDS: administrator feeds are validated, named safely and never point at private addresses', () => {
+  const raw = JSON.stringify([
+    { name: 'Al Jazeera English (YouTube)', url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCNye-wNBqNL5ZzHSJj3l8Bg' },
+    { name: 'Local thing', url: 'https://localhost/feed.xml' },
+    { name: 'Private net', url: 'https://192.168.1.5/feed.xml' },
+    { name: 'Not https', url: 'http://example.org/feed.xml' },
+    { name: 'With password', url: 'https://user:pw@example.org/feed.xml' },
+    { name: '', url: 'https://example.org/feed.xml' },
+    { name: 'Good feed', url: 'https://example.org/feed.xml' },
+    { name: 'Good feed', url: 'https://example.org/other.xml' },
+  ]);
+  const { sources, problems } = parseExtraFeeds(raw, 900_000);
+  assert.deepEqual(sources.map((source) => source.id), ['extra-al-jazeera-english-youtube', 'extra-good-feed', 'extra-good-feed-2']);
+  assert.equal(problems.length, 5);
+  assert.equal(sources[0].format, 'Atom (YouTube channel)');
+  assert.equal(sources[0].connector, 'rss');
+  assert.deepEqual(parseExtraFeeds('not json', 900_000).sources, []);
+  assert.match(parseExtraFeeds('{"a":1}', 900_000).problems[0], /JSON list/);
+  assert.deepEqual(parseExtraFeeds(undefined, 900_000), { sources: [], problems: [] });
+  assert.equal(buildSources(900_000, { EXTRA_FEEDS: raw } as NodeJS.ProcessEnv).filter((source) => source.id.startsWith('extra-')).length, 3);
+  assert.equal(buildSources(900_000, {} as NodeJS.ProcessEnv).filter((source) => source.id.startsWith('extra-')).length, 0);
 });

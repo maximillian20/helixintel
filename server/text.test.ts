@@ -34,3 +34,16 @@ test('stored records saved with HTML are repaired once', () => {
   assert.equal(store.cleanStoredText(), 0);
   store.close();
 });
+
+test('YouTube channel feeds: title, video link, date and description are read', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?><feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/" xmlns="http://www.w3.org/2005/Atom">
+    <title>Example Channel</title><entry><id>yt:video:abc123</id><yt:videoId>abc123</yt:videoId><title>Aid convoy reaches the city</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=abc123"/><published>2026-10-14T09:00:00+00:00</published><updated>2026-10-14T09:30:00+00:00</updated>
+    <media:group><media:title>Aid convoy reaches the city</media:title><media:description>Trucks arrived after a week.&#10;Subscribe for more.</media:description></media:group></entry></feed>`;
+  const source = buildSources(900_000, { EXTRA_FEEDS: JSON.stringify([{ name: 'Example (YouTube)', url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCtest' }]) } as NodeJS.ProcessEnv).find((candidate) => candidate.id.startsWith('extra-'))!;
+  const [video] = parseRssArticles(xml, source);
+  assert.equal(video.headline, 'Aid convoy reaches the city');
+  assert.equal(video.canonicalUrl, 'https://www.youtube.com/watch?v=abc123');
+  assert.equal(video.summary, 'Trucks arrived after a week. Subscribe for more.');
+  assert.equal(video.publishedAt, '2026-10-14T09:00:00.000Z');
+});
