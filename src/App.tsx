@@ -335,7 +335,7 @@ function OverviewPanel({ feed }: { feed: PublicFeedState }) {
         <div>
           <span className="meta-label">System mode</span>
           <strong className="success-text">
-            LIVE – PUBLIC WEB{pollMinutes ? ` (checked every ${pollMinutes} min)` : ''}
+            LIVE{pollMinutes ? ` (checked every ${pollMinutes} min)` : ''}
           </strong>
         </div>
       </section>
@@ -524,7 +524,7 @@ function OverviewPanel({ feed }: { feed: PublicFeedState }) {
           </div>
           <div className="country-list">
             {mentions.length === 0 && <p className="muted-note">No place names detected yet.</p>}
-            {mentions.slice(0, 8).map((entry) => (
+            {mentions.slice(0, 5).map((entry) => (
               <div key={entry.place.name} className="country-row">
                 <strong>{entry.place.name}</strong>
                 <span className="badge neutral">{entry.items.length} article{entry.items.length === 1 ? '' : 's'}</span>

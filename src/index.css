@@ -2346,3 +2346,11 @@ a:visited { color: #c4b5fd; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 input[type="date"] { color-scheme: dark; background: rgba(15, 23, 42, 0.7); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px; font: inherit; }
+
+/* Overview: the map grows to match the headlines column instead of leaving an empty block, and shorter panels do not stretch */
+.map-panel { display: flex; flex-direction: column; }
+.map-panel .world-map { flex: 1 1 auto; height: auto; min-height: 420px; }
+.map-panel .world-map .leaflet-container { position: absolute; inset: 0; height: auto; }
+.content-grid:not(.top-row) { align-items: start; }
+.content-grid.charts-grid { align-items: stretch; }
+@media (max-width: 1040px) { .map-panel .world-map { height: 380px; flex: none; } }
