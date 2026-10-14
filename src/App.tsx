@@ -438,6 +438,16 @@ function OverviewPanel({ feed }: { feed: PublicFeedState }) {
                   />
                 </LayersControl.BaseLayer>
               </LayersControl>
+              {visibleGroups.filter((group) => isFreshAlert(group, now)).map((group) => (
+                <CircleMarker
+                  key={`pulse-${group.key}`}
+                  center={[group.lat, group.lng]}
+                  radius={5 + 14 * Math.sqrt(group.items.length / maxGroupSize)}
+                  interactive={false}
+                  className="map-pulse"
+                  pathOptions={{ color: SEVERITY_COLORS[group.severity], weight: 2, fill: false }}
+                />
+              ))}
               {visibleGroups.map((group) => (
                 <CircleMarker
                   key={group.key}
@@ -464,6 +474,7 @@ function OverviewPanel({ feed }: { feed: PublicFeedState }) {
           </div>
           <div className="map-legend" aria-label="Map legend">
             <strong>Report severity</strong>
+            <span className="legend-item"><i className="pulse-dot" />Pulsing: High or Critical, last 2 h</span>
             {SEVERITIES.map((severity) => (
               <span key={severity} className="legend-item">
                 <i className="legend-dot" style={{ background: SEVERITY_COLORS[severity] }} />
@@ -635,6 +646,14 @@ function SeverityBadge({ severity, manual }: { severity: string; manual?: boolea
 function shortSummary(text: string, max = 320) {
   const clean = text.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
   return clean.length > max ? `${clean.slice(0, max).replace(/\s+\S*$/, '')}…` : clean;
+}
+
+/** A High or Critical report published in the last 2 hours. Only these pulse, so motion always means something new and serious. */
+const FRESH_ALERT_MS = 2 * 60 * 60 * 1000;
+function isFreshAlert(group: { severity: string; items: Array<{ publishedAt: string }> }, now: number | Date) {
+  if (group.severity !== 'Critical' && group.severity !== 'High') return false;
+  const nowMs = typeof now === 'number' ? now : now.getTime();
+  return group.items.some((item) => nowMs - Date.parse(item.publishedAt) >= 0 && nowMs - Date.parse(item.publishedAt) <= FRESH_ALERT_MS);
 }
 
 function toViewItem(item: FeedItemDto): ViewItem {
