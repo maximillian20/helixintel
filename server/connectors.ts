@@ -341,6 +341,26 @@ export function buildSources(pollIntervalMs: number): SourceDefinition[] {
       attribution: 'UN News', termsUrl: 'https://news.un.org/en/', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs,
     },
     {
+      id: 'aljazeera', name: 'Al Jazeera English', url: 'https://www.aljazeera.com/xml/rss/all.xml', format: 'RSS 2.0',
+      coverage: 'International news, English-language, strong Middle East, Africa and Asia coverage', cadence: `${fast}; 15-minute article cache`,
+      attribution: 'Al Jazeera English', termsUrl: 'https://www.aljazeera.com/terms/', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs,
+    },
+    {
+      id: 'guardian-world', name: 'The Guardian World', url: 'https://www.theguardian.com/world/rss', format: 'RSS 2.0',
+      coverage: 'International news, English-language world desk', cadence: `${fast}; 15-minute article cache`,
+      attribution: 'The Guardian', termsUrl: 'https://www.theguardian.com/help/terms-of-service', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs,
+    },
+    {
+      id: 'who-don', name: 'WHO Disease Outbreak News', url: 'https://www.who.int/feeds/entity/csr/don/en/rss.xml', format: 'RSS 2.0',
+      coverage: 'Official World Health Organization announcements of disease outbreaks and public-health events', cadence: `${fast}; 15-minute article cache`,
+      attribution: 'World Health Organization', termsUrl: 'https://www.who.int/about/policies/terms-of-use', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs,
+    },
+    {
+      id: 'uk-fcdo-travel', name: 'UK Foreign Office travel advice', url: 'https://www.gov.uk/foreign-travel-advice.atom', format: 'Atom',
+      coverage: 'Official UK government travel advice updates by country (security, entry rules and local risks)', cadence: `${fast}; 15-minute article cache`,
+      attribution: 'UK Foreign, Commonwealth & Development Office', termsUrl: 'https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs,
+    },
+    {
       id: 'gdacs', name: 'GDACS', url: 'https://www.gdacs.org/xml/rss.xml', format: 'RSS 2.0 + GDACS/GeoRSS',
       coverage: 'Earthquakes, cyclones, floods, volcanoes, droughts and wildfires with alert levels and coordinates',
       cadence: fast, attribution: 'Global Disaster Alert and Coordination System (EC-JRC / UN OCHA), CC BY 4.0',
