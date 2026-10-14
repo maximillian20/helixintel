@@ -299,7 +299,7 @@ textarea {
 
 .content-grid {
   display: grid;
-  grid-template-columns: 1.45fr 0.9fr;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 0.9fr);
   gap: 18px;
   margin-bottom: 18px;
 }
@@ -2354,3 +2354,7 @@ input[type="date"] { color-scheme: dark; background: rgba(15, 23, 42, 0.7); colo
 .content-grid:not(.top-row) { align-items: start; }
 .content-grid.charts-grid { align-items: stretch; }
 @media (max-width: 1040px) { .map-panel .world-map { height: 380px; flex: none; } }
+
+/* Long publisher text never widens a column; report summaries are shortened in lists */
+.feed-result, .feed-detail, .priority-intel, .panel { min-width: 0; overflow-wrap: anywhere; }
+.priority-list p, .feed-result p { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { openSharedEvents } from './data/eventHub.ts';
 import type { Map as LeafletMap } from 'leaflet';
-import { CircleMarker, LayersControl, MapContainer, Popup, TileLayer, Tooltip } from 'react-leaflet';
+import { CircleMarker, LayersControl, MapContainer, Popup, TileLayer, Tooltip, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { AlertsBell, AnalystMenu } from './workspace/AlertsBell.tsx';
 import { AddToCountryDialog, CountriesModule } from './workspace/CountriesModule.tsx';
@@ -252,6 +252,19 @@ function SeverityMarkerPopup({ group, now }: { group: MapGroup; now: number }) {
 
 type PlaceMention = { place: Place; items: PublicFeedPayload['items'] };
 
+/** Keeps the map's drawing size in step with its box when the layout changes (window resize, panel growth). */
+function MapAutoResize() {
+  const map = useMap();
+  useEffect(() => {
+    const box = map.getContainer().parentElement;
+    if (!box || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => map.invalidateSize({ pan: false }));
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [map]);
+  return null;
+}
+
 function OverviewPanel({ feed }: { feed: PublicFeedState }) {
   const mapRef = useRef<LeafletMap>(null);
   const [mapFilter, setMapFilter] = useState('All locations');
@@ -444,6 +457,7 @@ function OverviewPanel({ feed }: { feed: PublicFeedState }) {
                   </Popup>
                 </CircleMarker>
               ))}
+              <MapAutoResize />
             </MapContainer>
           </div>
           <div className="map-legend" aria-label="Map legend">
