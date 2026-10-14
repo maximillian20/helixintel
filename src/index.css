@@ -2295,3 +2295,8 @@ button.avatar { border: 1px solid var(--border); color: var(--text); cursor: poi
 .sbl-exports a.disabled { opacity: 0.45; pointer-events: none; }
 @media (max-width: 1100px) { .sbl-editor-layout { grid-template-columns: 1fr; } }
 .sbl-editor-layout .ws-evidence a { color: #7dd3fc; }
+
+/* Watchlists overview */
+.wl-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.link-button { background: none; border: 0; padding: 0; color: #7dd3fc; font: inherit; text-decoration: underline; cursor: pointer; }
+.watch-card + .watch-card { margin-top: 10px; }

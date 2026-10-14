@@ -3,13 +3,13 @@ import { openSharedEvents } from './data/eventHub.ts';
 import type { Map as LeafletMap } from 'leaflet';
 import { CircleMarker, LayersControl, MapContainer, Popup, TileLayer, Tooltip } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { alertFeed, watchlists } from './data/demo.ts';
 import { AlertsBell, AnalystMenu } from './workspace/AlertsBell.tsx';
 import { AddToCountryDialog, CountriesModule } from './workspace/CountriesModule.tsx';
 import { IncidentLinkDialog, IncidentsModule } from './workspace/IncidentsModule.tsx';
 import { IndicatorsModule } from './workspace/IndicatorsModule.tsx';
 import { MapModule } from './workspace/MapModule.tsx';
 import { MarketModule } from './workspace/MarketModule.tsx';
+import { WatchlistsModule } from './workspace/WatchlistsModule.tsx';
 import { SibModule } from './workspace/SibModule.tsx';
 import type { Navigate } from './workspace/shared.tsx';
 import { findPlaces, type Place } from './data/geo.ts';
@@ -1107,68 +1107,6 @@ function IntelligenceFeedPanel({ feed, onNavigate, focusId }: { feed: PublicFeed
   );
 }
 
-function WatchlistPanel() {
-  return (
-    <div className="module-view">
-      <div className="module-header">
-        <div>
-          <div className="eyebrow">Watchlists and alerts</div>
-          <h2>Operational monitoring</h2>
-        </div>
-        <button className="outline-button">New watchlist</button>
-      </div>
-
-      <div className="watch-grid">
-        <div className="panel">
-          <div className="panel-header">
-            <h3>Watchlists</h3>
-          </div>
-          <div className="watchlist-stack">
-            {watchlists.map((watchlist) => (
-              <div key={watchlist.name} className="watch-card">
-                <div className="watch-head">
-                  <strong>{watchlist.name}</strong>
-                  <span className={`badge ${severityTone[watchlist.severity as keyof typeof severityTone]}`}>{watchlist.severity}</span>
-                </div>
-                <div className="detail-row">
-                  <span>{watchlist.type}</span>
-                  <span>{watchlist.alerts} alerts</span>
-                </div>
-                <div className="tag-list">
-                  {watchlist.items.map((item) => (
-                    <span key={item} className="chip">{item}</span>
-                  ))}
-                </div>
-                <small>{watchlist.lastUpdated}</small>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="panel">
-          <div className="panel-header">
-            <h3>Alert feed</h3>
-          </div>
-          <div className="alert-stack">
-            {alertFeed.map((alert) => (
-              <div key={alert.title} className="alert-item">
-                <div className="watch-head">
-                  <strong>{alert.title}</strong>
-                  <span className={`badge ${severityTone[alert.severity as keyof typeof severityTone]}`}>{alert.severity}</span>
-                </div>
-                <div className="detail-row">
-                  <span>{alert.channel}</span>
-                  <span>{alert.time}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function SourcesPanel() {
   const [sources, setSources] = useState<SourceRegistryItem[]>([]);
   const [selectedId, setSelectedId] = useState('');
@@ -1450,7 +1388,7 @@ function App() {
         {activeView === 'Incidents' && <IncidentsModule focusId={focusId} onNavigate={navigate} />}
         {activeView === 'Country Assessments' && <CountriesModule focusId={focusId} onNavigate={navigate} />}
         {activeView === 'SIBs' && <SibModule focusId={focusId} onNavigate={navigate} />}
-        {activeView === 'Watchlists' && <WatchlistPanel />}
+        {activeView === 'Watchlists' && <WatchlistsModule onNavigate={navigate} />}
         {activeView === 'Sources' && <SourcesPanel />}
       </main>
     </div>
