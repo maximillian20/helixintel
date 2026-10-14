@@ -381,17 +381,6 @@ export function buildSources(pollIntervalMs: number): SourceDefinition[] {
         instructions: 'Register for a free key at https://www.eia.gov/opendata/register.php, then set EIA_API_KEY on the server.',
       },
     },
-    {
-      id: 'entsoe', name: 'ENTSO-E Transparency Platform', url: 'https://web-api.tp.entsoe.eu/api', format: 'XML (RESTful API)',
-      coverage: 'European power-system data (generation and transmission outages)', cadence: 'Checked hourly once configured',
-      attribution: 'ENTSO-E Transparency Platform', termsUrl: 'https://transparency.entsoe.eu/content/static_content/Static%20content/terms%20and%20conditions/terms%20and%20conditions.html',
-      connector: 'entsoe', kind: 'energy', intervalMs: 60 * 60 * 1000,
-      credential: {
-        envVars: ['ENTSOE_API_TOKEN'],
-        signupUrl: 'https://transparency.entsoe.eu/',
-        instructions: 'Register on the Transparency Platform, then email transparency@entsoe.eu requesting "Restful API access" to receive a security token, and set ENTSOE_API_TOKEN on the server.',
-      },
-    },
   ];
 }
 
@@ -436,8 +425,6 @@ export async function fetchSource(source: SourceDefinition, context: ConnectorCo
       const response = await httpText(`${source.url}?${params}`, { fetcher, headers: { accept: 'application/json' } });
       return { articles: parseEia(response.text) };
     }
-    case 'entsoe':
-      throw new SourceFetchError('An ENTSO-E token is configured, but this build has no ENTSO-E parser yet (it could not be tested without a token).');
     default:
       throw new SourceFetchError(`Unknown connector for ${source.id}.`);
   }

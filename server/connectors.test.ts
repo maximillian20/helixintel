@@ -63,10 +63,7 @@ test('credentials: connectors without them are reported as missing and never fet
   assert.deepEqual(missingCredentials(byId.get('eia')!, { EIA_API_KEY: 'abc' }), []);
   assert.deepEqual(missingCredentials(byId.get('gdacs')!, {}), []);
   assert.equal(byId.get('cisa-kev')!.intervalMs, 6 * 60 * 60 * 1000);
-  await assert.rejects(
-    fetchSource(byId.get('entsoe')!, { fetcher: fetch, env: { ENTSOE_API_TOKEN: 'x' }, checkpoint: { etag: null, lastModified: null }, now }),
-    /no ENTSO-E parser/,
-  );
+  assert.equal(byId.has('entsoe'), false, 'a source with no working connector is not listed');
 });
 
 test('network errors are retried with backoff, then reported; HTTP 429 carries Retry-After', async () => {

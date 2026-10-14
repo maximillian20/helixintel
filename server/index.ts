@@ -159,7 +159,7 @@ function buildFeedResponse(cached: boolean) {
 
 function redact(message: string) {
   let safe = message;
-  for (const name of ['EIA_API_KEY', 'ENTSOE_API_TOKEN', 'RELIEFWEB_APPNAME']) {
+  for (const name of ['EIA_API_KEY', 'RELIEFWEB_APPNAME']) {
     const value = process.env[name]?.trim();
     if (value) safe = safe.split(value).join('[redacted]');
   }
