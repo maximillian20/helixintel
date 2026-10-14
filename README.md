@@ -39,6 +39,7 @@ Environment variables: see `.env.example`. Set `SOURCE_DB_PATH` to a persistent 
 | GDELT DOC 2.0 (news headlines) | Free API | optional `GDELT_QUERY` |
 | CISA Known Exploited Vulnerabilities | Free JSON | none |
 | ReliefWeb | Free, needs a pre-approved app name (https://apidoc.reliefweb.int/) | `RELIEFWEB_APPNAME` |
+| ACLED conflict events | Free myACLED account; read ACLED's terms (some commercial use is limited) | `ACLED_EMAIL`, `ACLED_PASSWORD` |
 | US EIA oil spot prices | Free key (https://www.eia.gov/opendata/register.php) | `EIA_API_KEY` |
 
 ### Extra feeds (including YouTube channels)
