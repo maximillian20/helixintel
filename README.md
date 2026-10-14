@@ -33,6 +33,7 @@ Environment variables: see `.env.example`. Set `SOURCE_DB_PATH` to a persistent 
 | Source | Access | Server setting |
 | --- | --- | --- |
 | BBC News World, UN News, Al Jazeera English, The Guardian World | Free RSS | none |
+| WHO News (English) | Free RSS | none |
 | UK Foreign Office travel advice | Free Atom feed (Open Government Licence) | none |
 | GDACS (disasters, with alert levels and coordinates) | Free RSS, CC BY 4.0 | none |
 | GDELT DOC 2.0 (news headlines) | Free API | optional `GDELT_QUERY` |
