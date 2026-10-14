@@ -252,39 +252,6 @@ export const countryAssessmentDetails = [
   }
 ];
 
-export const watchlists = [
-  {
-    name: 'Red Sea corridor',
-    type: 'Region',
-    items: ['Bab el-Mandeb', 'Gulf of Aden', 'Djibouti', 'Aden'],
-    severity: 'High',
-    alerts: 3,
-    lastUpdated: '06 Oct 2026 / 18:40 UTC'
-  },
-  {
-    name: 'Iran / Gulf security',
-    type: 'Country',
-    items: ['Iran', 'UAE', 'Oman', 'Qatar'],
-    severity: 'Critical',
-    alerts: 5,
-    lastUpdated: '06 Oct 2026 / 17:20 UTC'
-  },
-  {
-    name: 'Critical infrastructure',
-    type: 'Facility',
-    items: ['Port of Jebel Ali', 'Basra industrial zone', 'Gas terminal network'],
-    severity: 'Moderate',
-    alerts: 2,
-    lastUpdated: '05 Oct 2026 / 21:10 UTC'
-  }
-];
-
-export const alertFeed = [
-  { title: 'Critical incident in monitored region', channel: 'In-app + email', severity: 'Critical', time: '06 Oct 2026 / 18:44 UTC' },
-  { title: 'Three or more reports of military movement within 72 hours', channel: 'Teams webhook', severity: 'High', time: '06 Oct 2026 / 17:58 UTC' },
-  { title: 'Human-rights alert affecting foreign nationals', channel: 'Email', severity: 'Moderate', time: '06 Oct 2026 / 17:00 UTC' }
-];
-
 export const threatIndicators = [
   {
     id: 'TI-031',
