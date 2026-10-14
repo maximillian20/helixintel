@@ -54,7 +54,6 @@ const navItems = [
   'Map',
   'Watchlists',
   'Sources',
-  'Settings',
 ] as const;
 
 type PublicFeedPayload = {
