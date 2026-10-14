@@ -1,6 +1,6 @@
 # Global Security Intelligence
 
-This repository contains a demo-ready web application for political-risk, security, and human-rights monitoring.
+This repository contains a web application for political-risk, security, and human-rights monitoring.
 
 ## Quick start
 
@@ -12,9 +12,9 @@ This repository contains a demo-ready web application for political-risk, securi
 4. Open the frontend at http://localhost:5173
 5. API health check: http://localhost:3001/api/health
 
-## Demo mode
+## Data
 
-The platform is configured to run without external API keys. All operational data is seeded from the demo dataset and clearly labelled as DEMO DATA � NOT REAL-TIME.
+Every figure in the app comes from real public sources or from your own saved work (incidents, assessments, bulletins, watches and places). There is no demo mode and no sample data. If a source is blocked or needs setup, the Sources page says so and the affected screens show that status instead of a made-up value.
 
 ## Deploy
 
