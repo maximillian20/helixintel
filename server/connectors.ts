@@ -549,7 +549,8 @@ export async function fetchSource(source: SourceDefinition, context: ConnectorCo
     }
     case 'acled': {
       const form = new URLSearchParams({ username: env.ACLED_EMAIL ?? '', password: env.ACLED_PASSWORD ?? '', grant_type: 'password', client_id: 'acled', scope: 'authenticated' });
-      const auth = await httpText('https://acleddata.com/oauth/token', { fetcher, method: 'POST', body: form.toString(), headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' }, attempts: 1 });
+      const auth = await httpText('https://acleddata.com/oauth/token', { fetcher, method: 'POST', body: form.toString(), headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' }, attempts: 1 })
+        .catch((error: unknown) => { throw new SourceFetchError(`ACLED sign-in failed (${error instanceof Error ? error.message : 'request failed'}). Check ACLED_EMAIL and ACLED_PASSWORD, and that the account is confirmed.`); });
       let token: string | undefined;
       try { token = (JSON.parse(auth.text) as { access_token?: string }).access_token; } catch { /* handled below */ }
       if (!token) throw new SourceFetchError('ACLED sign-in did not return a token. Check ACLED_EMAIL and ACLED_PASSWORD.');
@@ -557,7 +558,8 @@ export async function fetchSource(source: SourceDefinition, context: ConnectorCo
       const from = new Date(now.getTime() - 7 * day).toISOString().slice(0, 10);
       const to = now.toISOString().slice(0, 10);
       const query = new URLSearchParams({ _format: 'json', limit: '500', event_date: `${from}|${to}`, event_date_where: 'BETWEEN' });
-      const response = await httpText(`${source.url}?${query}`, { fetcher, headers: { accept: 'application/json', authorization: `Bearer ${token}` }, attempts: 2 });
+      const response = await httpText(`${source.url}?${query}`, { fetcher, headers: { accept: 'application/json', authorization: `Bearer ${token}` }, attempts: 2 })
+        .catch((error: unknown) => { throw new SourceFetchError(`ACLED accepted the sign-in but refused the data request (${error instanceof Error ? error.message : 'request failed'}). The account's access level may not include API data.`); });
       return { articles: parseAcled(response.text) };
     }
     case 'eia': {
