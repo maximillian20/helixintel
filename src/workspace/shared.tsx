@@ -79,20 +79,31 @@ export const STATUS_LABEL: Record<SourceStatusItem['status'], string> = {
 export function DataStatus({ sources, ids, now }: { sources: SourceStatusItem[] | null; ids: string[]; now: number }) {
   if (!sources) return <div className="ws-datastatus" role="status">Loading source status…</div>;
   const rows = ids.map((id) => sources.find((source) => source.id === id)).filter((source): source is SourceStatusItem => Boolean(source));
+  const counts = rows.reduce<Record<string, number>>((acc, source) => ({ ...acc, [source.status]: (acc[source.status] ?? 0) + 1 }), {});
+  const order: SourceStatusItem['status'][] = ['healthy', 'stale', 'unavailable', 'setup_required', 'not_checked'];
   return (
-    <section className="ws-datastatus" aria-label="Data sources">
-      {rows.map((source) => (
-        <div key={source.id} className={`ws-source ${source.status}`}>
-          <strong>{source.name}</strong>
-          <span className="ws-source-state">{STATUS_LABEL[source.status]}</span>
-          <small>Last successful retrieval: {source.lastSuccessAt ? `${fmt(source.lastSuccessAt)} (${ago(source.lastSuccessAt, now)})` : 'none yet'}</small>
-          <small>Newest publication: {source.latestPublishedAt ? fmt(source.latestPublishedAt) : 'no records'}</small>
-          {source.status === 'stale' && <small>Showing previously retrieved data.</small>}
-          {source.status === 'unavailable' && source.lastSuccessAt && <small>Showing previously retrieved data; the latest attempt failed.</small>}
-          {source.status === 'setup_required' && <small>{source.setup?.instructions ?? 'A server credential is required.'}</small>}
-        </div>
-      ))}
-    </section>
+    <details className="ws-datastatus" aria-label="Data sources">
+      <summary>
+        <span className="ws-ds-title">Data sources</span>
+        {order.filter((status) => counts[status]).map((status) => (
+          <span key={status} className={`ws-ds-chip ${status}`}>{counts[status]} {STATUS_LABEL[status].toLowerCase()}</span>
+        ))}
+        <span className="ws-ds-hint">Details</span>
+      </summary>
+      <div className="ws-ds-grid">
+        {rows.map((source) => (
+          <div key={source.id} className={`ws-source ${source.status}`}>
+            <strong>{source.name}</strong>
+            <span className="ws-source-state">{STATUS_LABEL[source.status]}</span>
+            <small>Last successful retrieval: {source.lastSuccessAt ? `${fmt(source.lastSuccessAt)} (${ago(source.lastSuccessAt, now)})` : 'none yet'}</small>
+            <small>Newest publication: {source.latestPublishedAt ? fmt(source.latestPublishedAt) : 'no records'}</small>
+            {source.status === 'stale' && <small>Showing previously retrieved data.</small>}
+            {source.status === 'unavailable' && source.lastSuccessAt && <small>Showing previously retrieved data; the latest attempt failed.</small>}
+            {source.status === 'setup_required' && <small>{source.setup?.instructions ?? 'A server credential is required.'}</small>}
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }
 

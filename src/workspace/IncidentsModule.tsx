@@ -522,7 +522,7 @@ export function IncidentsModule({ focusId, onNavigate }: { focusId?: string; onN
       <div className="module-header">
         <div>
           <div className="eyebrow">Incident analysis</div>
-          <h2>Incidents</h2>
+          <h2>Incident register</h2>
         </div>
         <div className="feed-heading-actions">
           <span className="status-pill neutral">{all.data ? `${list.data?.total ?? 0} of ${all.data.total}` : '…'} incidents</span>
