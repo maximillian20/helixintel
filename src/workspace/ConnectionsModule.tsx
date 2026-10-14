@@ -9,7 +9,7 @@ const COLUMNS: Array<{ type: ConnectionNode['type']; title: string; left: number
   { type: 'incident', title: 'Incidents', left: 360, right: 640 },
   { type: 'country', title: 'Countries', left: 720, right: 1000 },
 ];
-const ROW = 72;
+const ROW = 84;
 const TYPE_LABEL: Record<ConnectionNode['type'], string> = { incident: 'Incident', country: 'Country', sib: 'Bulletin' };
 
 function open(node: ConnectionNode, onNavigate: Navigate) {
