@@ -43,6 +43,7 @@ const manualCheckCooldownMs = 60 * 1000;
 const publicSources: SourceDefinition[] = buildSources(pollIntervalMs);
 
 const sourceStore = new SourceStore();
+sourceStore.cleanStoredText();
 const analysisStore = new AnalysisStore(sourceStore.handle);
 const marketStore = new MarketStore(sourceStore.handle);
 const geoStore = new GeoStore(sourceStore.handle);

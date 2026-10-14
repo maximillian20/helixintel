@@ -4,6 +4,7 @@ export type DatabaseHandle = InstanceType<typeof Database>;
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { plainText } from './text';
 
 export type SyncStatus = 'healthy' | 'stale' | 'unavailable' | 'not_checked' | 'setup_required';
 
@@ -276,6 +277,14 @@ export class SourceStore {
       WHERE source_sync_leases.expires_at <= ?
     `).run(ownerId, leaseUntil.toISOString(), now.toISOString());
     return result.changes === 1;
+  }
+
+  /** Repairs stored records saved before summaries were converted to plain text (some feeds send HTML). */
+  cleanStoredText() {
+    const rows = this.database.prepare("SELECT id, headline, summary FROM source_records WHERE headline LIKE '%<%' OR summary LIKE '%<%' OR summary LIKE '%&lt;%' OR summary LIKE '%&amp;%'").all() as Array<{ id: string; headline: string; summary: string }>;
+    const update = this.database.prepare('UPDATE source_records SET headline = ?, summary = ? WHERE id = ?');
+    for (const row of rows) update.run(plainText(row.headline).slice(0, 500) || row.headline, plainText(row.summary).slice(0, 4000), row.id);
+    return rows.length;
   }
 
   releaseSyncLease(ownerId: string) {

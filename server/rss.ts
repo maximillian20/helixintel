@@ -1,5 +1,6 @@
 import { XMLParser } from 'fast-xml-parser';
 import type { NormalizedArticle, SourceDefinition } from './source-store';
+import { plainText } from './text';
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -85,8 +86,8 @@ export function parseRssArticles(xml: string, source: SourceDefinition): Normali
     : (Array.isArray(atomEntries) ? atomEntries : atomEntries ? [atomEntries] : []);
 
   return (entries as Array<Record<string, unknown>>).flatMap((entry) => {
-    const headline = textValue(entry.title).slice(0, 500);
-    const summary = textValue(entry.description ?? entry.summary ?? entry.content).slice(0, 10000);
+    const headline = plainText(textValue(entry.title)).slice(0, 500);
+    const summary = plainText(textValue(entry.description ?? entry.summary ?? entry.content)).slice(0, 4000);
     const rawUrl = linkValue(entry.link) || textValue(entry.guid ?? entry.id);
     const publishedAt = dateValue(entry.pubDate, entry.published, entry.date, entry.updated);
     if (!headline || !rawUrl || !publishedAt) return [];
