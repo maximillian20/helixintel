@@ -2358,3 +2358,25 @@ input[type="date"] { color-scheme: dark; background: rgba(15, 23, 42, 0.7); colo
 /* Long publisher text never widens a column; report summaries are shortened in lists */
 .feed-result, .feed-detail, .priority-intel, .panel { min-width: 0; overflow-wrap: anywhere; }
 .priority-list p, .feed-result p { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Connections */
+.cn-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
+.cn-headings { display: grid; grid-template-columns: 28% 28% 28%; justify-content: space-between; color: var(--muted); font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+.cn-canvas { position: relative; min-height: 80px; }
+.cn-edges { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.cn-edge { fill: none; stroke: #64748b; stroke-width: 1.5; }
+.cn-edge.based-on { stroke-dasharray: 5 4; }
+.cn-edge.on { stroke: #7dd3fc; stroke-width: 2.2; }
+.cn-edge.off { opacity: 0.18; }
+.cn-node { position: absolute; display: grid; align-content: center; gap: 2px; padding: 8px 12px; text-align: left; border: 1px solid var(--border); border-left: 4px solid #475569; border-radius: 10px; background: rgba(15, 23, 42, 0.92); color: var(--text); font: inherit; cursor: pointer; overflow: hidden; }
+.cn-node strong { font-size: 0.86rem; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.cn-node small { color: var(--muted); font-size: 0.74rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cn-node.selected { border-color: #7dd3fc; box-shadow: 0 0 0 2px rgba(125, 211, 252, 0.35); }
+.cn-node.dim { opacity: 0.35; }
+.cn-linked { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 6px; }
+.cn-detail h3 { margin: 16px 0 4px; font-size: 0.95rem; }
+@media (max-width: 1000px) {
+  .cn-layout { grid-template-columns: 1fr; }
+  .cn-board { overflow-x: auto; }
+  .cn-canvas, .cn-headings { min-width: 760px; }
+}

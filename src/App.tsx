@@ -11,6 +11,7 @@ import { MapModule } from './workspace/MapModule.tsx';
 import { MarketModule } from './workspace/MarketModule.tsx';
 import { WatchlistsModule } from './workspace/WatchlistsModule.tsx';
 import { SibModule } from './workspace/SibModule.tsx';
+import { ConnectionsModule } from './workspace/ConnectionsModule.tsx';
 import type { Navigate } from './workspace/shared.tsx';
 import { findPlaces, type Place } from './data/geo.ts';
 import {
@@ -51,6 +52,7 @@ const navItems = [
   'Threat Indicators',
   'Market Impact',
   'SIBs',
+  'Connections',
   'Map',
   'Watchlists',
   'Sources',
@@ -1398,6 +1400,7 @@ function App() {
         {activeView === 'Incidents' && <IncidentsModule focusId={focusId} onNavigate={navigate} />}
         {activeView === 'Country Assessments' && <CountriesModule focusId={focusId} onNavigate={navigate} />}
         {activeView === 'SIBs' && <SibModule focusId={focusId} onNavigate={navigate} />}
+        {activeView === 'Connections' && <ConnectionsModule onNavigate={navigate} />}
         {activeView === 'Watchlists' && <WatchlistsModule onNavigate={navigate} />}
         {activeView === 'Sources' && <SourcesPanel />}
       </main>
