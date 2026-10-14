@@ -18,7 +18,7 @@ export type SourceDefinition = {
   attribution: string;
   termsUrl: string;
   /** Which connector fetches this source. Defaults to the generic RSS reader. */
-  connector?: 'rss' | 'gdacs' | 'gdelt' | 'cisa-kev' | 'reliefweb' | 'eia';
+  connector?: 'rss' | 'gdacs' | 'gdelt' | 'cisa-kev' | 'reliefweb' | 'eia' | 'acled';
   kind?: 'news' | 'hazard' | 'humanitarian' | 'cyber' | 'energy';
   /** How often the source is checked. Defaults to the global polling interval. */
   intervalMs?: number;

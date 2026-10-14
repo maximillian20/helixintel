@@ -36,8 +36,8 @@ test('multi-source sync: failures are isolated, cached data survives, recovery w
     let status = statuses();
     assert.equal(status.get('un-news'), 'unavailable', 'the failing source is reported honestly');
     for (const id of ['bbc-world', 'gdacs', 'gdelt', 'cisa-kev']) assert.equal(status.get(id), 'healthy', id);
-    for (const id of ['reliefweb', 'eia']) assert.equal(status.get(id), 'setup_required', id);
-    assert.ok(!calls.includes('api.reliefweb.int') && !calls.includes('api.eia.gov'), 'credential-gated sources are never called');
+    for (const id of ['reliefweb', 'eia', 'acled']) assert.equal(status.get(id), 'setup_required', id);
+    assert.ok(!calls.includes('api.reliefweb.int') && !calls.includes('api.eia.gov') && !calls.includes('acleddata.com'), 'credential-gated sources are never called');
     const counts = () => Object.fromEntries(['bbc-world', 'gdacs', 'gdelt', 'cisa-kev'].map((id) => [id, sourceStore.getRecords(id).length]));
     assert.deepEqual(counts(), { 'bbc-world': 1, gdacs: 2, gdelt: 2, 'cisa-kev': 2 });
 

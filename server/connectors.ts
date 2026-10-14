@@ -297,6 +297,50 @@ export function parseReliefWeb(text: string): NormalizedArticle[] {
   return articles;
 }
 
+// ---------------------------------------------------------------- ACLED
+
+type AcledEvent = {
+  event_id_cnty?: string; event_date?: string; event_type?: string; sub_event_type?: string;
+  actor1?: string; actor2?: string; country?: string; admin1?: string; location?: string;
+  latitude?: string | number; longitude?: string | number; fatalities?: string | number; notes?: string; source?: string;
+};
+
+export function parseAcled(text: string): NormalizedArticle[] {
+  let payload: { data?: AcledEvent[] };
+  try { payload = JSON.parse(text) as { data?: AcledEvent[] }; } catch { throw new SourceFetchError('ACLED response was not valid JSON.'); }
+  const articles: NormalizedArticle[] = [];
+  for (const event of payload.data ?? []) {
+    const publishedAt = toIso(event.event_date);
+    if (!event.event_id_cnty || !event.event_type || !publishedAt) continue;
+    const place = [event.location, event.admin1, event.country].filter(Boolean).join(', ');
+    const fatalities = Number(event.fatalities);
+    const lat = Number(event.latitude);
+    const lng = Number(event.longitude);
+    const codes = event.country ? findCountryCodes(event.country) : [];
+    const actors = [event.actor1, event.actor2].filter(Boolean).join(' / ');
+    const canonicalUrl = canonicalizeArticleUrl(`https://acleddata.com/?event_id_cnty=${encodeURIComponent(event.event_id_cnty)}`);
+    articles.push({
+      sourceRecordId: event.event_id_cnty,
+      canonicalUrl,
+      headline: `${event.sub_event_type || event.event_type}${place ? ` in ${place}` : ''}`,
+      summary: [
+        event.notes?.replace(/\s+/g, ' ').trim().slice(0, 600),
+        actors ? `Actors: ${actors}.` : '',
+        Number.isFinite(fatalities) ? `Reported fatalities: ${fatalities}.` : '',
+        `ACLED event ${event.event_id_cnty}${event.source ? `; original sources: ${event.source}` : ''}.`,
+      ].filter(Boolean).join(' '),
+      publishedAt,
+      sourceModifiedAt: null,
+      enrichment: {
+        category: event.event_type.toLowerCase(),
+        ...(codes.length > 0 ? { countryCodes: codes } : {}),
+        ...(Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0) ? { location: { lat, lng, label: place || 'ACLED event location' } } : {}),
+      },
+    });
+  }
+  return articles;
+}
+
 // ---------------------------------------------------------------- EIA
 
 export function parseEia(text: string): NormalizedArticle[] {
@@ -412,6 +456,11 @@ function buildBuiltInSources(pollIntervalMs: number): SourceDefinition[] {
       attribution: 'UK Foreign, Commonwealth & Development Office', termsUrl: 'https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs,
     },
     {
+      id: 'us-state-travel', name: 'US State Department travel advisories', url: 'https://travel.state.gov/_res/rss/TAsTWs.xml', format: 'RSS 2.0',
+      coverage: 'Official US travel advisories and alerts by country (levels 1 to 4 with risk indicators)', cadence: `${fast}; 15-minute article cache`,
+      attribution: 'U.S. Department of State, Bureau of Consular Affairs', termsUrl: 'https://travel.state.gov/content/travel/en/rss.html', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs,
+    },
+    {
       id: 'gdacs', name: 'GDACS', url: 'https://www.gdacs.org/xml/rss.xml', format: 'RSS 2.0 + GDACS/GeoRSS',
       coverage: 'Earthquakes, cyclones, floods, volcanoes, droughts and wildfires with alert levels and coordinates',
       cadence: fast, attribution: 'Global Disaster Alert and Coordination System (EC-JRC / UN OCHA), CC BY 4.0',
@@ -439,6 +488,17 @@ function buildBuiltInSources(pollIntervalMs: number): SourceDefinition[] {
         envVars: ['RELIEFWEB_APPNAME'],
         signupUrl: 'https://apidoc.reliefweb.int/',
         instructions: 'ReliefWeb requires a pre-approved application name. Request one at https://apidoc.reliefweb.int/ (free), then set RELIEFWEB_APPNAME on the server.',
+      },
+    },
+    {
+      id: 'acled', name: 'ACLED conflict events', url: 'https://acleddata.com/api/acled/read', format: 'JSON (API)',
+      coverage: 'Geolocated political violence, protest and strategic-development events worldwide (last 7 days)', cadence: 'Checked hourly',
+      attribution: 'ACLED (Armed Conflict Location & Event Data); each event credits its original sources', termsUrl: 'https://acleddata.com/terms-and-conditions',
+      connector: 'acled', kind: 'news', intervalMs: 60 * 60 * 1000,
+      credential: {
+        envVars: ['ACLED_EMAIL', 'ACLED_PASSWORD'],
+        signupUrl: 'https://acleddata.com/',
+        instructions: 'ACLED needs a free myACLED account. Register at https://acleddata.com/, read its terms of use (they limit some commercial use), then set ACLED_EMAIL and ACLED_PASSWORD on the server. What data a free account can read depends on ACLED\'s access level for your account.',
       },
     },
     {
@@ -486,6 +546,19 @@ export async function fetchSource(source: SourceDefinition, context: ConnectorCo
       });
       const response = await httpText(url, { fetcher, method: 'POST', body, headers: { accept: 'application/json', 'content-type': 'application/json' } });
       return { articles: parseReliefWeb(response.text) };
+    }
+    case 'acled': {
+      const form = new URLSearchParams({ username: env.ACLED_EMAIL ?? '', password: env.ACLED_PASSWORD ?? '', grant_type: 'password', client_id: 'acled', scope: 'authenticated' });
+      const auth = await httpText('https://acleddata.com/oauth/token', { fetcher, method: 'POST', body: form.toString(), headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' }, attempts: 1 });
+      let token: string | undefined;
+      try { token = (JSON.parse(auth.text) as { access_token?: string }).access_token; } catch { /* handled below */ }
+      if (!token) throw new SourceFetchError('ACLED sign-in did not return a token. Check ACLED_EMAIL and ACLED_PASSWORD.');
+      const day = 86_400_000;
+      const from = new Date(now.getTime() - 7 * day).toISOString().slice(0, 10);
+      const to = now.toISOString().slice(0, 10);
+      const query = new URLSearchParams({ _format: 'json', limit: '500', event_date: `${from}|${to}`, event_date_where: 'BETWEEN' });
+      const response = await httpText(`${source.url}?${query}`, { fetcher, headers: { accept: 'application/json', authorization: `Bearer ${token}` }, attempts: 2 });
+      return { articles: parseAcled(response.text) };
     }
     case 'eia': {
       const params = new URLSearchParams({ api_key: env.EIA_API_KEY ?? '', frequency: 'daily', 'data[0]': 'value', length: '6' });

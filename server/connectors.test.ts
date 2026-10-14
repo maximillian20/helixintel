@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { eiaJson, gdacsXml, gdeltJson, kevJson, reliefWebJson } from './fixtures';
-import { parseExtraFeeds, buildSources, fetchSource, missingCredentials, parseEia, parseGdacs, parseGdelt, parseKev, parseReliefWeb } from './connectors';
+import { parseExtraFeeds, buildSources, fetchSource, missingCredentials, parseEia, parseGdacs, parseGdelt, parseKev, parseReliefWeb, parseAcled } from './connectors';
 import { SourceFetchError } from './rss';
 
 const now = new Date('2026-10-11T08:00:00Z');
@@ -117,4 +117,17 @@ test('EXTRA_FEEDS: administrator feeds are validated, named safely and never poi
   assert.deepEqual(parseExtraFeeds(undefined, 900_000), { sources: [], problems: [] });
   assert.equal(buildSources(900_000, { EXTRA_FEEDS: raw } as NodeJS.ProcessEnv).filter((source) => source.id.startsWith('extra-')).length, 3);
   assert.equal(buildSources(900_000, {} as NodeJS.ProcessEnv).filter((source) => source.id.startsWith('extra-')).length, 0);
+});
+
+test('ACLED parser maps documented event fields and the source stays gated without a login', () => {
+  const [event] = parseAcled(JSON.stringify({ status: 200, data: [{ event_id_cnty: 'SDN123', event_date: '2026-10-12', event_type: 'Violence against civilians', sub_event_type: 'Attack', actor1: 'Military forces', country: 'Sudan', admin1: 'Khartoum', location: 'Omdurman', latitude: '15.64', longitude: '32.48', fatalities: '4', notes: 'Shelling hit a market.', source: 'Local media' }, { event_date: '2026-10-12' }] }));
+  assert.equal(event.headline, 'Attack in Omdurman, Khartoum, Sudan');
+  assert.equal(event.publishedAt, '2026-10-12T00:00:00.000Z');
+  assert.deepEqual(event.enrichment?.countryCodes, ['SD']);
+  assert.equal(event.enrichment?.location?.lat, 15.64);
+  assert.match(event.summary, /Reported fatalities: 4/);
+  assert.equal(parseAcled(JSON.stringify({ data: [{ event_date: '2026-10-12' }] })).length, 0, 'events without an id or type are skipped');
+  const byId = new Map(buildSources(900_000, {}).map((s) => [s.id, s]));
+  assert.deepEqual(missingCredentials(byId.get('acled')!, {}), ['ACLED_EMAIL', 'ACLED_PASSWORD']);
+  assert.ok(byId.has('us-state-travel'));
 });
