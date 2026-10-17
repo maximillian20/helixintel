@@ -40,6 +40,8 @@ Environment variables: see `.env.example`. Set `SOURCE_DB_PATH` to a persistent 
 | CISA Known Exploited Vulnerabilities | Free JSON | none |
 | ReliefWeb | Free, needs a pre-approved app name (https://apidoc.reliefweb.int/) | `RELIEFWEB_APPNAME` |
 | ACLED conflict events | Free myACLED account; read ACLED's terms (some commercial use is limited) | `ACLED_EMAIL`, `ACLED_PASSWORD` |
+| UK NCSC, The Hacker News, Krebs on Security, The Record, Schneier on Security, Dark Reading, SecurityWeek | Public cyber security feeds, no key needed (checked every 30 minutes) | none |
+| Africanews, Anadolu Agency (world), gCaptain | Public news feeds for Africa, the Middle East and shipping | none |
 | US EIA oil spot prices | Free key (https://www.eia.gov/opendata/register.php) | `EIA_API_KEY` |
 
 ### Extra feeds (including YouTube channels)

@@ -423,6 +423,7 @@ export function buildSources(pollIntervalMs: number, env: NodeJS.ProcessEnv = pr
 function buildBuiltInSources(pollIntervalMs: number): SourceDefinition[] {
   const minutes = Math.round(pollIntervalMs / 60000);
   const fast = `${minutes}-minute polling`;
+  const slowCadence = `${minutes * 2}-minute polling`;
   return [
     {
       id: 'bbc-world', name: 'BBC News World', url: 'https://feeds.bbci.co.uk/news/world/rss.xml', format: 'RSS 2.0',
@@ -459,6 +460,56 @@ function buildBuiltInSources(pollIntervalMs: number): SourceDefinition[] {
       id: 'us-state-travel', name: 'US State Department travel advisories', url: 'https://travel.state.gov/_res/rss/TAsTWs.xml', format: 'RSS 2.0',
       coverage: 'Official US travel advisories and alerts by country (levels 1 to 4 with risk indicators)', cadence: `${fast}; 15-minute article cache`,
       attribution: 'U.S. Department of State, Bureau of Consular Affairs', termsUrl: 'https://travel.state.gov/content/travel/en/rss.html', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs,
+    },
+    {
+      id: 'ncsc-uk', name: 'UK NCSC (National Cyber Security Centre)', url: 'https://www.ncsc.gov.uk/api/1/services/v1/all-rss-feed.xml', format: 'RSS 2.0',
+      coverage: 'Official UK government cyber security guidance, advisories and news', cadence: `${slowCadence}; 15-minute article cache`,
+      attribution: 'UK National Cyber Security Centre', termsUrl: 'https://www.ncsc.gov.uk/section/about-this-website/terms-and-conditions', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs * 2,
+    },
+    {
+      id: 'the-hacker-news', name: 'The Hacker News', url: 'https://feeds.feedburner.com/TheHackersNews', format: 'RSS 2.0',
+      coverage: 'Cyber security news: breaches, vulnerabilities, malware and threat actors', cadence: `${slowCadence}; 15-minute article cache`,
+      attribution: 'The Hacker News', termsUrl: 'https://thehackernews.com/p/about-us.html', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs * 2,
+    },
+    {
+      id: 'krebs', name: 'Krebs on Security', url: 'https://krebsonsecurity.com/feed/', format: 'RSS 2.0',
+      coverage: 'Investigative cyber crime reporting', cadence: `${slowCadence}; 15-minute article cache`,
+      attribution: 'Krebs on Security', termsUrl: 'https://krebsonsecurity.com/about/', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs * 2,
+    },
+    {
+      id: 'the-record', name: 'The Record (Recorded Future News)', url: 'https://therecord.media/feed', format: 'RSS 2.0',
+      coverage: 'Cyber security, cyber crime and state-linked cyber activity news', cadence: `${slowCadence}; 15-minute article cache`,
+      attribution: 'The Record from Recorded Future News', termsUrl: 'https://therecord.media/about', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs * 2,
+    },
+    {
+      id: 'schneier', name: 'Schneier on Security', url: 'https://www.schneier.com/feed/atom/', format: 'Atom',
+      coverage: 'Security and cryptography analysis and commentary', cadence: `${slowCadence}; 15-minute article cache`,
+      attribution: 'Schneier on Security', termsUrl: 'https://www.schneier.com/', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs * 2,
+    },
+    {
+      id: 'dark-reading', name: 'Dark Reading', url: 'https://www.darkreading.com/rss.xml', format: 'RSS 2.0',
+      coverage: 'Enterprise cyber security news and analysis', cadence: `${slowCadence}; 15-minute article cache`,
+      attribution: 'Dark Reading', termsUrl: 'https://www.darkreading.com/about-us', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs * 2,
+    },
+    {
+      id: 'securityweek', name: 'SecurityWeek', url: 'https://www.securityweek.com/feed/', format: 'RSS 2.0',
+      coverage: 'Cyber security news, including industrial control systems and threat reports', cadence: `${slowCadence}; 15-minute article cache`,
+      attribution: 'SecurityWeek', termsUrl: 'https://www.securityweek.com/about-us/', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs * 2,
+    },
+    {
+      id: 'africanews', name: 'Africanews', url: 'https://www.africanews.com/feed/rss', format: 'RSS 2.0',
+      coverage: 'News from across Africa, English-language', cadence: `${fast}; 15-minute article cache`,
+      attribution: 'Africanews', termsUrl: 'https://www.africanews.com/terms-and-conditions', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs,
+    },
+    {
+      id: 'anadolu-world', name: 'Anadolu Agency (world)', url: 'https://www.aa.com.tr/en/rss/default?cat=world', format: 'RSS 2.0',
+      coverage: 'World news with strong coverage of the Middle East, Türkiye, Balkans and Africa', cadence: `${fast}; 15-minute article cache`,
+      attribution: 'Anadolu Agency', termsUrl: 'https://www.aa.com.tr/en/p/terms-of-use', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs,
+    },
+    {
+      id: 'gcaptain', name: 'gCaptain', url: 'https://gcaptain.com/feed/', format: 'RSS 2.0',
+      coverage: 'Maritime, shipping and offshore industry news, including sea-lane disruption', cadence: `${slowCadence}; 15-minute article cache`,
+      attribution: 'gCaptain', termsUrl: 'https://gcaptain.com/about/', connector: 'rss', kind: 'news', intervalMs: pollIntervalMs * 2,
     },
     {
       id: 'gdacs', name: 'GDACS', url: 'https://www.gdacs.org/xml/rss.xml', format: 'RSS 2.0 + GDACS/GeoRSS',
