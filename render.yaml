@@ -11,6 +11,17 @@ services:
         value: "true"
       - key: SOURCE_DB_PATH
         value: /var/data/source-store.sqlite
+      # AI is optional; see docs/AI.md. No-install route: AI_PROVIDER=cloudflare + account id + token.
+      - key: AI_PROVIDER
+        sync: false   # "cloudflare" for Workers AI Free plan; leave empty for Ollama on your own computer
+      - key: AI_CLOUDFLARE_ACCOUNT_ID
+        sync: false
+      - key: AI_BASE_URL
+        sync: false   # Ollama route only: https tunnel address of your own computer
+      - key: AI_API_KEY
+        sync: false   # Cloudflare API token, or the secret shared with tools/ollama-gateway.mjs
+      - key: AI_MODEL
+        sync: false   # optional; each route has its own default
     disk:
       name: data
       mountPath: /var/data

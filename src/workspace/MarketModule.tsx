@@ -1,3 +1,4 @@
+import { AiExplain } from './AiPanels.tsx';
 import { useEffect, useMemo, useState } from 'react';
 import { marketFetch, useMarketData } from '../data/marketApi.ts';
 import { sortedCountries } from '../data/countries.ts';
@@ -212,7 +213,7 @@ function AssetPicker({ onPick, label, filterOut }: { onPick: (asset: AssetWithSt
   );
 }
 
-function EventViewTab({ focusKey, onChart }: { focusKey: string | null; onChart: (id: string) => void }) {
+function EventViewTab({ focusKey, onChart, onNavigate }: { focusKey: string | null; onChart: (id: string) => void; onNavigate: Navigate }) {
   const [filters, setFilters] = usePersistentState('market-event-filters', { q: '', severity: 'All', category: 'All', country: 'All', days: 14, all: false });
   const [selected, setSelected] = usePersistentState<{ key: string }>('market-event-selected', { key: '' });
   const meta = useMarketData<Meta>('/meta');
@@ -287,6 +288,8 @@ function EventViewTab({ focusKey, onChart }: { focusKey: string | null; onChart:
               {detail.sessionNotes.map((n) => <p key={n.calendar} className="market-session"><small><strong>{n.calendar === 'XNYS' ? 'US exchanges' : n.calendar === '24x7' ? 'Crypto (24/7)' : 'Daily spot prices'}:</strong> {n.note}</small></p>)}
               <Notice>Price changes shown after a report are observations. They are not evidence that the report caused them, and they are not forecasts or advice.</Notice>
             </div>
+            <AiExplain key={selected.key} title="AI explanation of possible market pathways" path="/market/explain" body={{ eventKey: selected.key }} label="Explain possible pathways" onNavigate={onNavigate}
+              hint="Uses the event and the price changes already shown. It explains why an asset might be exposed, offers alternative explanations and states limits. It does not predict prices or give trading advice." />
             <div className="ws-form-actions">
               <button className="ghost-button" onClick={() => setAdding(!adding)} aria-expanded={adding}>Link another asset</button>
               {untracked.length > 0 && <button className="ghost-button" onClick={() => void trackAll()}>Track all {untracked.length} suggested assets (fetch their prices)</button>}
@@ -526,7 +529,7 @@ function MethodTab() {
 type Tab = 'Event view' | 'Asset view' | 'Watchlists' | 'Associations' | 'Sources and method';
 const TABS: Tab[] = ['Event view', 'Asset view', 'Watchlists', 'Associations', 'Sources and method'];
 
-export function MarketModule({ focusId }: { focusId?: string; onNavigate: Navigate }) {
+export function MarketModule({ focusId, onNavigate }: { focusId?: string; onNavigate: Navigate }) {
   const [tab, setTab] = usePersistentState<{ name: Tab }>('market-tab', { name: 'Event view' });
   const [assetId, setAssetId] = usePersistentState<{ id: string }>('market-asset', { id: '' });
   const [eventFocus, setEventFocus] = useState<string | null>(null);
@@ -552,7 +555,7 @@ export function MarketModule({ focusId }: { focusId?: string; onNavigate: Naviga
         {TABS.map((name) => <button key={name} role="tab" aria-selected={tab.name === name} className={tab.name === name ? 'selected' : ''} onClick={() => setTab({ name })}>{name}</button>)}
       </div>
       <p className="muted-note" aria-live="polite">Times in UTC. Updated {ago(meta.data?.serverTime ?? null, now)}.</p>
-      {tab.name === 'Event view' && <EventViewTab focusKey={eventFocus} onChart={openChart} />}
+      {tab.name === 'Event view' && <EventViewTab focusKey={eventFocus} onChart={openChart} onNavigate={onNavigate} />}
       {tab.name === 'Asset view' && <AssetViewTab assetId={assetId.id} setAssetId={(id) => setAssetId({ id })} onOpenEvent={(key) => { setEventFocus(key); setTab({ name: 'Event view' }); }} />}
       {tab.name === 'Watchlists' && <WatchlistTab onChart={openChart} />}
       {tab.name === 'Associations' && <AssociationsTab />}

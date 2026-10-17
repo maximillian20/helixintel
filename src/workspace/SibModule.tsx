@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { SEVERITIES } from '../data/feedTypes.ts';
-import { useWorkspaceData, wsFetch } from '../data/workspaceApi.ts';
+import { getAnalystName, useWorkspaceData, wsFetch } from '../data/workspaceApi.ts';
 import { sibDocument, sibFilename, sibMailto, sibToHtml, sibToText, type SibDocument } from '../data/sibExport.ts';
 import {
   SIB_CLASSIFICATIONS, SIB_STATUSES, approvalBlockers,
@@ -11,13 +11,14 @@ import { Modal, Notice, fmt, fmtDay, usePersistentState, type Navigate } from '.
 
 const sevClass = (severity: string) => `badge sev-${severity.toLowerCase()}`;
 
-type Form = Omit<SibFields, 'assets' | 'actions'> & { assets: string; actions: string };
-const toForm = (sib: SibFields): Form => ({ ...sib, assets: sib.assets.join('\n'), actions: sib.actions.join('\n') });
+type Form = Omit<SibFields, 'assets' | 'actions' | 'uncertainties' | 'nextReviewDate'> & { assets: string; actions: string; uncertainties: string; nextReviewDate: string };
+const toForm = (sib: SibFields): Form => ({ ...sib, assets: sib.assets.join('\n'), actions: sib.actions.join('\n'), uncertainties: sib.uncertainties ?? '', nextReviewDate: sib.nextReviewDate ?? '' });
 const lines = (value: string) => value.split('\n').map((entry) => entry.trim()).filter(Boolean);
-const fromForm = (form: Form): SibFields => ({ ...form, assets: lines(form.assets), actions: lines(form.actions) });
+const fromForm = (form: Form): SibFields => ({ ...form, assets: lines(form.assets), actions: lines(form.actions), uncertainties: form.uncertainties.trim(), nextReviewDate: form.nextReviewDate || null });
 const pickFields = (sib: SibRecord): SibFields => ({
   title: sib.title, classification: sib.classification, severity: sib.severity, location: sib.location, summary: sib.summary, situation: sib.situation,
   employeeImpact: sib.employeeImpact, operationsImpact: sib.operationsImpact, assets: sib.assets, actions: sib.actions,
+  uncertainties: sib.uncertainties ?? '', nextReviewDate: sib.nextReviewDate ?? null,
 });
 
 // ------------------------------------------------------------------ export helpers
@@ -175,7 +176,7 @@ function SibDetailView({ id, onBack, onNavigate }: { id: string; onBack: () => v
 
   const locked = sib.status === 'Approved';
   const working: SibRecord = { ...sib, ...fromForm(form) };
-  const blockers = approvalBlockers({ ...fromForm(form), evidence: sib.evidence });
+  const blockers = approvalBlockers({ ...fromForm(form), evidence: sib.evidence, ai: sib.ai });
   const savedDoc = sibDocument(sib, new Date().toISOString());
   const previewDoc = sibDocument(working, new Date().toISOString());
   const set = <K extends keyof Form>(key: K, value: Form[K]) => setForm((current) => (current ? { ...current, [key]: value } : current));
@@ -228,6 +229,15 @@ function SibDetailView({ id, onBack, onNavigate }: { id: string; onBack: () => v
       )}
       {sib.sourceState === 'missing' && <Notice kind="stale">The record this bulletin was based on no longer exists. The saved text and source reports are kept as they were.</Notice>}
       {locked && <Notice>This bulletin is approved and locked. Reopen it as a draft to change it.</Notice>}
+      {sib.ai && (
+        <Notice kind="stale">
+          <strong>Drafted with AI.</strong> {sib.ai.model}{sib.ai.modelDigest ? ` (${sib.ai.modelDigest})` : ''} wrote this draft on {fmt(sib.ai.generatedAt)} from {sib.ai.recordIds.length} saved record{sib.ai.recordIds.length === 1 ? '' : 's'}. Every [number] in the text refers to the source list below. Check the facts against those sources, edit the text, and review the uncertainties before approving.
+          {sib.ai.confirmedBy
+            ? <> Reviewed and confirmed by {sib.ai.confirmedBy} on {fmt(sib.ai.confirmedAt)}.</>
+            : !locked && <> <button className="outline-button small" disabled={busy || dirty || !getAnalystName()} title={!getAnalystName() ? 'Set your analyst name first (top right).' : dirty ? 'Save your changes first.' : undefined} onClick={() => void run(() => wsFetch('POST', `/sibs/${id}/confirm-ai`, {}), 'Confirmed as reviewed.')}>I have reviewed this draft</button></>}
+          {!locked && !sib.ai.confirmedBy && !getAnalystName() && <div className="muted-note">Confirming records your name, so set it first from the round button at the top right.</div>}
+        </Notice>
+      )}
       {!locked && blockers.length > 0 && (
         <Notice>Before it can be approved: {blockers.join(' ')}</Notice>
       )}
@@ -259,6 +269,8 @@ function SibDetailView({ id, onBack, onNavigate }: { id: string; onBack: () => v
                 <label className="wide">Impact on operations<textarea rows={3} value={form.operationsImpact} maxLength={4000} onChange={(event) => set('operationsImpact', event.target.value)} /></label>
                 <label className="wide">Affected assets and locations (one per line)<textarea rows={3} value={form.assets} onChange={(event) => set('assets', event.target.value)} /></label>
                 <label className="wide">Recommended actions (one per line)<textarea rows={4} value={form.actions} onChange={(event) => set('actions', event.target.value)} /></label>
+                <label className="wide">Uncertainties and information gaps<textarea rows={3} value={form.uncertainties} maxLength={3000} placeholder="What is not known, or reported by only one source." onChange={(event) => set('uncertainties', event.target.value)} /></label>
+                <label>Next review date<input type="date" value={form.nextReviewDate} onChange={(event) => set('nextReviewDate', event.target.value)} /></label>
               </div>
             </fieldset>
           </form>
@@ -266,9 +278,11 @@ function SibDetailView({ id, onBack, onNavigate }: { id: string; onBack: () => v
           <h4 className="sbl-subhead">Based on</h4>
           <p>
             {sib.source.label}{' '}
-            <button className="ghost-button small" onClick={() => (sib.source.type === 'incident' ? onNavigate('Incidents', sib.source.id) : onNavigate('Country Assessments', sib.source.code))}>
-              Open {sib.source.type === 'incident' ? 'incident' : 'assessment'}
-            </button>
+            {sib.source.type === 'reports'
+              ? <button className="ghost-button small" onClick={() => onNavigate('Intelligence Feed')}>Open the feed</button>
+              : <button className="ghost-button small" onClick={() => (sib.source.type === 'incident' ? onNavigate('Incidents', sib.source.id) : onNavigate('Country Assessments', (sib.source as { code: string }).code))}>
+                Open {sib.source.type === 'incident' ? 'incident' : 'assessment'}
+              </button>}
           </p>
           <h4 className="sbl-subhead">Source reports ({sib.evidence.length})</h4>
           {sib.evidence.length === 0 ? <p className="muted-note">None attached.</p> : (

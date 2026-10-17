@@ -123,3 +123,7 @@ Rules: a draft needs a title, a severity other than Unassessed, a location, an e
 There are no user accounts. The approver is the analyst name set in the browser (top-right circle); approval is refused without one. It records who approved but does not verify identity. Bulletins are private to the browser that created them, like incidents.
 
 Exports use one document model, so they match the preview: **PDF (print)** opens the browser print dialog (choose *Save as PDF*), **Word (.doc)** is an HTML document Word opens and edits, **HTML**, **Email** (a shortened text version in your mail program) and **Copy text**. Drafts are marked "not approved" in every export. Classification choices are Public, Internal, Internal / Restricted and Confidential.
+
+## AI features (free, no install needed)
+
+Ask Helix, report summaries, related-report suggestions, incident and country assistants, AI-drafted bulletins, briefings and plain-language map filters. They use Cloudflare Workers AI on its Free plan, set up with three Render settings and nothing installed locally, or alternatively a free model through Ollama on a computer you own. Never a paid API. Private records are not sent to the hosted service unless you opt in. When no model is connected the app shows "AI setup required" and everything else works. Setup, hardware, costs, safety design and known limits are in [docs/AI.md](docs/AI.md). `npm run ai:eval` checks your model against a small labelled test set; `npm run ai:gateway` runs the authenticated gateway for your computer.

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { NotFoundError, ValidationError } from './analysis-store';
 import type { DatabaseHandle } from './source-store';
-import { approvalBlockers, type SibAuditEntry, type SibEvidence, type SibFields, type SibRecord, type SibSourceRef, type SibSummary } from '../src/data/sibTypes';
+import { approvalBlockers, type SibAiMeta, type SibAuditEntry, type SibEvidence, type SibFields, type SibRecord, type SibSourceRef, type SibSummary } from '../src/data/sibTypes';
 
 const ID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const newId = () => `SIB-${Array.from(randomBytes(6), (byte) => ID_ALPHABET[byte % ID_ALPHABET.length]).join('')}`;
@@ -58,15 +58,16 @@ export class SibStore {
       .map((row) => ({ id: Number(row.id), at: String(row.at), actor: String(row.actor), type: String(row.type), detail: String(row.detail) }));
   }
 
-  create(clientId: string, actor: string, input: { fields: SibFields; source: SibSourceRef; evidence: SibEvidence[] }, now: string): SibRecord {
+  create(clientId: string, actor: string, input: { fields: SibFields; source: SibSourceRef; evidence: SibEvidence[]; ai?: SibAiMeta }, now: string): SibRecord {
     let id = newId();
     while (this.get(clientId, id)) id = newId();
     const sib: SibRecord = {
       ...input.fields, id, status: 'Draft', revision: 0, source: input.source, evidence: input.evidence, createdBy: actor,
       createdAt: now, updatedAt: now, approvedAt: null, approvedBy: null, snapshotAt: now,
+      ...(input.ai ? { ai: input.ai } : {}),
     };
     this.db.prepare('INSERT INTO sibs (client_id, id, json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(clientId, id, JSON.stringify(sib), sib.status, now, now);
-    this.audit(clientId, id, actor, 'created', `Drafted from ${input.source.label}.`, now);
+    this.audit(clientId, id, actor, 'created', input.ai ? `Drafted with AI (${input.ai.model}) from ${input.source.label}. Not approved; ${input.ai.recordIds.length} supporting records.` : `Drafted from ${input.source.label}.`, now);
     return sib;
   }
 
@@ -95,9 +96,20 @@ export class SibStore {
   reopen(clientId: string, actor: string, id: string, now: string): SibRecord {
     const current = this.owned(clientId, id);
     if (current.status !== 'Approved') throw new ValidationError('Only an approved bulletin can be reopened.');
-    const next: SibRecord = { ...current, status: 'Draft', approvedAt: null, approvedBy: null, updatedAt: now };
+    const next: SibRecord = { ...current, status: 'Draft', approvedAt: null, approvedBy: null, updatedAt: now, ...(current.ai ? { ai: { ...current.ai, confirmedBy: null, confirmedAt: null } } : {}) };
     this.save(clientId, next);
     this.audit(clientId, id, actor, 'reopened', `Reopened as a draft; the approval of revision ${current.revision} by ${current.approvedBy ?? 'an unrecorded approver'} no longer applies.`, now);
+    return next;
+  }
+
+  /** The explicit step that says a person has read and corrected an AI-assisted draft. Approval is blocked until it happens. */
+  confirmAi(clientId: string, actor: string, id: string, now: string): SibRecord {
+    const current = this.owned(clientId, id);
+    if (!current.ai) throw new ValidationError('This bulletin was not drafted with AI.');
+    if (current.status === 'Approved') throw new ValidationError('An approved bulletin is locked.');
+    const next: SibRecord = { ...current, ai: { ...current.ai, confirmedBy: actor, confirmedAt: now }, updatedAt: now };
+    this.save(clientId, next);
+    this.audit(clientId, id, actor, 'ai-confirmed', 'Confirmed that the AI-assisted text was reviewed.', now);
     return next;
   }
 

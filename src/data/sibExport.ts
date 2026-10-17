@@ -37,20 +37,24 @@ export function sibDocument(sib: SibRecord, generatedAt: string): SibDocument {
   add('Current situation', sib.situation);
   add('Impact on employees', sib.employeeImpact);
   add('Impact on operations', sib.operationsImpact);
+  add('Uncertainties and information gaps', sib.uncertainties ?? '');
   if (sib.assets.some((asset) => asset.trim())) blocks.push({ kind: 'list', heading: 'Affected assets and locations', items: sib.assets.filter((asset) => asset.trim()) });
   if (sib.actions.some((action) => action.trim())) blocks.push({ kind: 'list', heading: 'Recommended actions', items: sib.actions.filter((action) => action.trim()), ordered: true });
   if (sib.evidence.length > 0) blocks.push({ kind: 'sources', heading: 'Sources', items: sib.evidence });
+  const meta: Array<[string, string]> = [
+    ['Reference', sib.id],
+    ['Severity', sib.severity],
+    ['Location', sib.location || 'not stated'],
+    ['Based on', sib.source.label],
+    ['Status', approved ? `Approved by ${sib.approvedBy ?? 'unrecorded approver'} on ${stamp(sib.approvedAt)} (revision ${sib.revision})` : 'Draft'],
+  ];
+  if (sib.nextReviewDate) meta.push(['Next review', day(`${sib.nextReviewDate}T00:00:00Z`)]);
+  if (sib.ai) meta.push(['Drafting', `AI-assisted draft (${sib.ai.model}, ${stamp(sib.ai.generatedAt)}); reviewed and confirmed by ${sib.ai.confirmedBy ?? 'nobody yet'}`]);
   return {
     banner: sib.classification.toUpperCase(),
     draftNotice: approved ? null : 'DRAFT: not approved for distribution',
     title: sib.title || 'Untitled bulletin',
-    meta: [
-      ['Reference', sib.id],
-      ['Severity', sib.severity],
-      ['Location', sib.location || 'not stated'],
-      ['Based on', sib.source.label],
-      ['Status', approved ? `Approved by ${sib.approvedBy ?? 'unrecorded approver'} on ${stamp(sib.approvedAt)} (revision ${sib.revision})` : 'Draft'],
-    ],
+    meta,
     blocks,
     footer: `Prepared with Global Security Intelligence. Content as of ${stamp(generatedAt)}. Source reports are third-party publications; the assessment is the analyst's. Verify with the linked sources before acting.`,
   };

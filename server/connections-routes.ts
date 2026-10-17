@@ -45,7 +45,7 @@ export function buildConnections(analysis: AnalysisStore, sibs: SibStore, client
     const id = `sib:${sib.id}`;
     nodes.set(id, { id, type: 'sib', label: sib.title || 'Untitled bulletin', detail: sib.status, severity: sib.severity, openId: sib.id });
     if (sib.source.type === 'incident') addEdge({ from: id, to: `incident:${sib.source.id}`, kind: 'based-on' });
-    else addEdge({ from: id, to: countryNode(sib.source.code), kind: 'based-on' });
+    else if (sib.source.type === 'country') addEdge({ from: id, to: countryNode(sib.source.code), kind: 'based-on' });
   }
 
   for (const [id, node] of nodes) {

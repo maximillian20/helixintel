@@ -1,3 +1,4 @@
+import { AiExplain } from './AiPanels.tsx';
 import { useEffect, useMemo, useState } from 'react';
 import { sortedCountries } from '../data/countries.ts';
 import { wsFetch, useWorkspaceData } from '../data/workspaceApi.ts';
@@ -207,6 +208,8 @@ function IndicatorDetail({ id, geo, onGeo, onNavigate }: { id: string; geo: stri
       {reading.trend === 'Rising' && <p className="muted-note">{reading.definition.risingMeaning}</p>}
 
       <WeekChart reading={reading} selected={weekIndex} onSelect={setWeekIndex} />
+      <AiExplain key={`${reading.id}-${reading.geo}`} title="AI explanation" path="/indicators/explain" body={{ indicatorId: reading.id, geo: reading.geo }} label="Explain this indicator" onNavigate={onNavigate}
+        hint="The level, baseline and trend above are calculated by the app. The AI only explains what they mean, lists limits and suggests questions to ask. It never changes a threshold or a reading." />
       <p className="muted-note"><strong>Thresholds.</strong> {reading.thresholdBasis}</p>
 
       <dl className="feed-facts">

@@ -77,6 +77,10 @@ export function filterFeatures(features: MapFeature[], f: MapFilters): MapFeatur
     if (f.source && x.sourceId !== f.source) return false;
     if (f.review !== 'All' && x.reviewStatus !== f.review) return false;
     if (f.area && !inBounds(x.lat, x.lng, f.area)) return false;
+    if (f.keywords && f.keywords.length > 0) {
+      const text = `${x.title} ${x.summary}`.toLowerCase();
+      if (!f.keywords.some((word) => text.includes(word))) return false;
+    }
     return true;
   });
 }

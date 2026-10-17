@@ -215,4 +215,6 @@ export type MapFilters = {
   customTo: string;
   /** Show only records inside the map's bounds when the person pressed "Search this area". */
   area: [number, number, number, number] | null;
+  /** Plain words from the plain-language search; a record must mention at least one in its title or summary. */
+  keywords?: string[];
 };

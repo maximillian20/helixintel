@@ -1,9 +1,11 @@
 import type { Express, Request, Response } from 'express';
 import { z } from 'zod';
 import { NotFoundError, ValidationError, type AnalysisStore } from './analysis-store';
+import { buildAllItems } from './feed-service';
+import type { SourceStore } from './source-store';
 import { SIB_ID_PATTERN, type SibStore } from './sib-store';
 import { countryName, isKnownCountryCode } from '../src/data/countries';
-import { SEVERITIES } from '../src/data/feedTypes';
+import { SEVERITIES, SEVERITY_RANK, type FeedItemDto } from '../src/data/feedTypes';
 import {
   COUNTRY_RATING_TO_SEVERITY, EMPTY_FIELDS, SIB_CLASSIFICATIONS,
   type SibDetail, type SibEvidence, type SibFields, type SibRecord, type SibSourceRef, type SibSourceState,
@@ -12,6 +14,8 @@ import { COUNTRY_CATEGORIES, RATING_RANK, type AssessmentVersion, type IncidentD
 
 type Deps = {
   app: Express;
+  /** Needed for bulletins drafted from selected reports. */
+  store?: SourceStore;
   analysis: AnalysisStore;
   sibs: SibStore;
   requireClientId: (req: Request, res: Response) => string | null;
@@ -56,6 +60,26 @@ export function prefillFromIncident(incident: IncidentDetail): Prefill {
   };
 }
 
+/** Starting text for a bulletin drafted from selected feed reports. Only what the reports state is copied. */
+export function prefillFromReports(items: FeedItemDto[], ids: string[]): Prefill {
+  const first = items[0];
+  const top = [...items].sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity])[0];
+  const countryNames = [...new Set(items.flatMap((item) => item.countries.filter((c) => c.code !== 'GLOBAL' && c.code !== 'UNKNOWN').map((c) => c.name)))];
+  const lines = items.slice(0, 8).map((item) => `- ${item.source}, ${day(item.publishedAt)}: ${item.headline}`);
+  return {
+    fields: {
+      ...EMPTY_FIELDS,
+      title: `${first.headline}${items.length > 1 ? ` (and ${items.length - 1} more)` : ''}`.slice(0, 200),
+      severity: top.severity,
+      location: countryNames.join(', '),
+      summary: first.summary.slice(0, 4000),
+      situation: `Reports selected for this bulletin (newest first):\n${lines.join('\n')}`,
+    },
+    source: { type: 'reports', ids, label: `${items.length} selected report${items.length === 1 ? '' : 's'}` },
+    evidence: items.map((item) => ({ headline: item.headline, url: item.url || null, source: item.source || null, publishedAt: item.publishedAt })),
+  };
+}
+
 /** Starting text for a bulletin from a saved country assessment. */
 export function prefillFromAssessment(code: string, version: AssessmentVersion): Prefill {
   const name = countryName(code);
@@ -80,7 +104,16 @@ const fieldSchema = {
   title: z.string().max(200), classification: z.enum(SIB_CLASSIFICATIONS), severity: z.enum(SEVERITIES), location: z.string().max(200),
   summary: z.string().max(4000), situation: z.string().max(8000), employeeImpact: z.string().max(4000), operationsImpact: z.string().max(4000),
   assets: z.array(z.string().max(300)).max(30), actions: z.array(z.string().max(500)).max(30),
+  uncertainties: z.string().max(3000), nextReviewDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
 };
+
+/** Reports a bulletin source refers to, newest first; throws when any no longer exists. */
+export function reportsFor(store: SourceStore, clientId: string, ids: string[]): FeedItemDto[] {
+  const byId = new Map(buildAllItems(store, clientId).map((item) => [item.id, item]));
+  const missing = ids.filter((id) => !byId.has(id));
+  if (missing.length > 0) throw new NotFoundError('One or more of the selected reports no longer exist.');
+  return ids.map((id) => byId.get(id)!).sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+}
 
 function actorOf(req: Request, clientId: string) {
   const name = (req.header('x-analyst-name') ?? '').replace(/[^\p{L}\p{N} .'_-]/gu, '').trim().slice(0, 60);
@@ -88,7 +121,7 @@ function actorOf(req: Request, clientId: string) {
 }
 
 export function registerSibRoutes(deps: Deps) {
-  const { app, analysis, sibs, requireClientId, publish } = deps;
+  const { app, analysis, sibs, requireClientId, publish, store } = deps;
   const clock = () => (deps.now?.() ?? new Date()).toISOString();
 
   const route = (handler: (req: Request, res: Response, clientId: string, actor: { name: string; named: boolean }) => unknown) => (req: Request, res: Response) => {
@@ -117,6 +150,10 @@ export function registerSibRoutes(deps: Deps) {
 
   function currentPrefill(clientId: string, source: SibSourceRef): Prefill {
     if (source.type === 'incident') return prefillFromIncident(analysis.getIncident(clientId, source.id));
+    if (source.type === 'reports') {
+      if (!store) throw new ValidationError('Bulletins from reports are not available here.');
+      return prefillFromReports(reportsFor(store, clientId, source.ids), source.ids);
+    }
     const latest = analysis.latestAssessments(clientId).get(source.code);
     if (!latest) throw new NotFoundError(`There is no saved assessment for ${countryName(source.code)}. Save one in Country Assessments first.`);
     return prefillFromAssessment(source.code, latest);
@@ -125,6 +162,11 @@ export function registerSibRoutes(deps: Deps) {
   function sourceState(clientId: string, sib: SibRecord): SibSourceState {
     try {
       if (sib.source.type === 'incident') return analysis.getIncident(clientId, sib.source.id).updatedAt > sib.snapshotAt ? 'changed' : 'current';
+      if (sib.source.type === 'reports') {
+        if (!store) return 'current';
+        reportsFor(store, clientId, sib.source.ids);
+        return 'current';
+      }
       const latest = analysis.latestAssessments(clientId).get(sib.source.code);
       if (!latest) return 'missing';
       return latest.version > sib.source.version ? 'changed' : 'current';
@@ -146,12 +188,15 @@ export function registerSibRoutes(deps: Deps) {
       source: z.discriminatedUnion('type', [
         z.object({ type: z.literal('incident'), id: z.string().regex(/^INC-[A-Z0-9-]{4,16}$/) }),
         z.object({ type: z.literal('country'), code: z.string().max(8) }),
+        z.object({ type: z.literal('reports'), ids: z.array(z.string().min(1).max(2048)).min(1).max(8) }),
       ]),
     }).parse(req.body);
     if (body.source.type === 'country' && !isKnownCountryCode(body.source.code.toUpperCase())) throw new NotFoundError('Unknown country.');
     const ref: SibSourceRef = body.source.type === 'incident'
       ? { type: 'incident', id: body.source.id, label: '' }
-      : { type: 'country', code: body.source.code.toUpperCase(), label: '', version: 0 };
+      : body.source.type === 'reports'
+        ? { type: 'reports', ids: body.source.ids, label: '' }
+        : { type: 'country', code: body.source.code.toUpperCase(), label: '', version: 0 };
     const prefill = currentPrefill(clientId, ref);
     const created = sibs.create(clientId, actor.name, prefill, clock());
     changed();
@@ -180,6 +225,13 @@ export function registerSibRoutes(deps: Deps) {
     const approved = sibs.approve(clientId, actor.name, sibId(req), clock());
     changed();
     return detail(clientId, approved);
+  }));
+
+  app.post('/api/workspace/sibs/:id/confirm-ai', route((req, _res, clientId, actor) => {
+    if (!actor.named) throw new ValidationError('Set your analyst name (the circle at the top right) before confirming, so the confirmation records who gave it.');
+    const confirmed = sibs.confirmAi(clientId, actor.name, sibId(req), clock());
+    changed();
+    return detail(clientId, confirmed);
   }));
 
   app.post('/api/workspace/sibs/:id/reopen', route((req, _res, clientId, actor) => {

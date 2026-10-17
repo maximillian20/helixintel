@@ -1,3 +1,4 @@
+import { AiExplain, DraftBulletinButton } from './AiPanels.tsx';
 import { useEffect, useMemo, useState } from 'react';
 import { wsFetch, useWorkspaceData } from '../data/workspaceApi.ts';
 import {
@@ -208,6 +209,10 @@ function CountryDetailView({ code, onBack, onNavigate }: { code: string; onBack:
       {error && <Notice kind="error">{error}</Notice>}
       {detailState.error && <Notice kind="stale">Could not refresh: {detailState.error}. Showing data loaded {fmt(detailState.lastLoadedAt)}.</Notice>}
       <DataStatus sources={sources} ids={SOURCE_IDS} now={now} />
+      <AiExplain key={code} title="AI assessment assistant" path={`/countries/${code}/assist`} label="Review with AI" onNavigate={onNavigate} needsPrivate
+        hint="Reads the saved assessment, its evidence and recent reports for this country and suggests what may have changed. It never edits, rescales or overwrites your assessment, and it does not score countries.">
+        {detail.latest && <DraftBulletinButton source={{ type: 'country', code }} onNavigate={onNavigate} small />}
+      </AiExplain>
 
       <div className="panel">
         <div className="panel-header">

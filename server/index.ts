@@ -25,6 +25,11 @@ import { registerSibRoutes } from './sib-routes';
 import { registerWatchlistRoutes } from './watchlist-routes';
 import { registerConnectionsRoutes } from './connections-routes';
 import { runMarketSync } from './market-sync';
+import { AiService } from './ai/service';
+import { readAiConfig } from './ai/config';
+import { AiStore } from './ai/store';
+import { registerAiRoutes } from './ai/routes';
+import { aiTick, newTickState } from './ai/tick';
 import { captureReportSnapshots, clearEventCache, evaluateMarketAlerts } from './market-service';
 import { SourceStore, type SourceDefinition, type StoredArticle, type SyncState } from './source-store';
 
@@ -51,6 +56,11 @@ const marketStore = new MarketStore(sourceStore.handle);
 const geoStore = new GeoStore(sourceStore.handle);
 const placeStore = new PlaceStore(sourceStore.handle);
 const sibStore = new SibStore(sourceStore.handle);
+const aiService = new AiService(readAiConfig(process.env));
+const aiStore = new AiStore(sourceStore.handle);
+const aiTickState = newTickState();
+let aiBusy = false;
+let aiTimer: NodeJS.Timeout | undefined;
 const adsbClient = new AdsbClient(process.env, fetch, () => new Date());
 let geoBusy = false;
 let marketTimer: NodeJS.Timeout | undefined;
@@ -162,7 +172,7 @@ function buildFeedResponse(cached: boolean) {
 
 function redact(message: string) {
   let safe = message;
-  for (const name of ['EIA_API_KEY', 'RELIEFWEB_APPNAME', 'ACLED_EMAIL', 'ACLED_PASSWORD']) {
+  for (const name of ['EIA_API_KEY', 'RELIEFWEB_APPNAME', 'ACLED_EMAIL', 'ACLED_PASSWORD', 'AI_API_KEY']) {
     const value = process.env[name]?.trim();
     if (value) safe = safe.split(value).join('[redacted]');
   }
@@ -276,6 +286,19 @@ async function geoTick() {
     console.warn('[map] tick failed', error instanceof Error ? error.message : error);
   } finally {
     geoBusy = false;
+  }
+}
+
+/** Background AI work (automatic summaries, scheduled briefings). Idle and silent unless a model is connected. */
+async function aiBackgroundTick() {
+  if (aiBusy) return;
+  aiBusy = true;
+  try {
+    await aiTick({ ai: aiService, aiStore, store: sourceStore, analysis: analysisStore, places: placeStore, sources: publicSources, env: process.env, now: new Date() }, aiTickState, publishEvent);
+  } catch (error) {
+    console.warn('[ai] tick failed', error instanceof Error ? error.message : error);
+  } finally {
+    aiBusy = false;
   }
 }
 
@@ -465,12 +488,17 @@ registerMarketRoutes({
   kick: () => { if (process.env.NODE_ENV !== 'test') setTimeout(() => { void marketTick(); }, 250); },
 });
 
-registerSibRoutes({ app, analysis: analysisStore, sibs: sibStore, requireClientId, publish: publishEvent });
+registerSibRoutes({ app, store: sourceStore, analysis: analysisStore, sibs: sibStore, requireClientId, publish: publishEvent });
 registerWatchlistRoutes({ app, analysis: analysisStore, places: placeStore, requireClientId });
 registerConnectionsRoutes({ app, analysis: analysisStore, sibs: sibStore, requireClientId });
 
 registerMapRoutes({
   app, store: sourceStore, analysis: analysisStore, geo: geoStore, places: placeStore, adsb: adsbClient, requireClientId, publish: publishEvent,
+});
+
+registerAiRoutes({
+  app, ai: aiService, aiStore, store: sourceStore, analysis: analysisStore, places: placeStore, market: marketStore, sibs: sibStore,
+  sources: publicSources, env: process.env, requireClientId, publish: publishEvent,
 });
 
 const distDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '../dist');
@@ -491,6 +519,8 @@ function startBackgroundSync() {
   void geoTick();
   geoTimer = setInterval(() => { void geoTick(); }, 60_000);
   geoTimer.unref();
+  aiTimer = setInterval(() => { void aiBackgroundTick(); }, 60_000);
+  aiTimer.unref();
 }
 
 if (process.env.NODE_ENV !== 'test') {
@@ -506,6 +536,7 @@ if (process.env.NODE_ENV !== 'test') {
     if (scheduler) clearInterval(scheduler);
     if (marketTimer) clearInterval(marketTimer);
     if (geoTimer) clearInterval(geoTimer);
+    if (aiTimer) clearInterval(aiTimer);
     for (const client of eventClients) client.end();
     eventClients.clear();
     server.close(() => {

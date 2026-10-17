@@ -12,6 +12,8 @@ import { MarketModule } from './workspace/MarketModule.tsx';
 import { WatchlistsModule } from './workspace/WatchlistsModule.tsx';
 import { SibModule } from './workspace/SibModule.tsx';
 import { ConnectionsModule } from './workspace/ConnectionsModule.tsx';
+import { AiModule } from './workspace/AiModule.tsx';
+import { ReportAiPanel } from './workspace/AiPanels.tsx';
 import type { Navigate } from './workspace/shared.tsx';
 import { findPlaces, type Place } from './data/geo.ts';
 import {
@@ -47,6 +49,7 @@ const severityTone = {
 const navItems = [
   'Overview',
   'Intelligence Feed',
+  'Ask Helix',
   'Incidents',
   'Country Assessments',
   'Threat Indicators',
@@ -1127,6 +1130,7 @@ function IntelligenceFeedPanel({ feed, onNavigate, focusId }: { feed: PublicFeed
               <button className="ghost-button" onClick={() => setCountryDialog(selectedItem)}>Add to country assessment</button>
               <button className="ghost-button" onClick={() => onNavigate('Market Impact', `report:${selectedItem.id}`)}>View market impact</button>
             </div>
+            <ReportAiPanel key={selectedItem.id} articleId={selectedItem.id} onNavigate={onNavigate} />
             <a className="source-link" href={selectedItem.url} target="_blank" rel="noreferrer">Open publisher article</a>
             {selectedItem.sourceUrl && <a className="source-link" href={selectedItem.sourceUrl} target="_blank" rel="noreferrer">View publisher feed</a>}
             <p className="muted-note">
@@ -1427,6 +1431,7 @@ function App() {
         {activeView === 'Overview' && <OverviewPanel feed={feed} />}
         {activeView === 'Map' && <MapModule focusId={focusId} onNavigate={navigate} />}
         {activeView === 'Intelligence Feed' && <IntelligenceFeedPanel feed={feed} onNavigate={navigate} focusId={focusId} />}
+        {activeView === 'Ask Helix' && <AiModule focusId={focusId} onNavigate={navigate} />}
         {activeView === 'Threat Indicators' && <IndicatorsModule focusId={focusId} onNavigate={navigate} />}
         {activeView === 'Market Impact' && <MarketModule focusId={focusId} onNavigate={navigate} />}
         {activeView === 'Incidents' && <IncidentsModule focusId={focusId} onNavigate={navigate} />}

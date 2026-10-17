@@ -1,3 +1,4 @@
+import { MapAiSearch } from './AiPanels.tsx';
 import L from 'leaflet';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Circle, GeoJSON, MapContainer, Marker, Polygon, Popup, Rectangle, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet';
@@ -398,14 +399,16 @@ export function MapModule({ focusId, onNavigate }: { focusId?: string; onNavigat
   }
 
   const setFilter = <K extends keyof MapFilters>(key: K, value: MapFilters[K]) => setFilters((f) => ({ ...f, [key]: value }));
-  const filtersActive = filters.country || filters.category || filters.severity !== 'All' || filters.source || filters.review !== 'All' || filters.area;
-  const clearFilters = () => setFilters((f) => ({ ...f, country: '', category: '', severity: 'All', source: '', review: 'All', area: null }));
+  const filtersActive = filters.country || filters.category || filters.severity !== 'All' || filters.source || filters.review !== 'All' || filters.area || (filters.keywords?.length ?? 0) > 0;
+  const clearFilters = () => setFilters((f) => ({ ...f, country: '', category: '', severity: 'All', source: '', review: 'All', area: null, keywords: [] }));
   const geoDown = (data?.geoStatus ?? []).some((s) => s.status === 'unavailable' || s.status === 'stale');
   const watchedNow = selected ? (watchOverride[selected.id] ?? selected.watchlisted) : null;
   const today = new Date().toISOString().slice(0, 10);
 
   return (
     <div className={`mp-root${fullscreen ? ' mp-full' : ''}`} ref={wrapRef} data-testid="map-workspace">
+      <MapAiSearch onApply={(result) => setFilters((f) => ({ ...f, ...result.filters, area: f.area, source: f.source, keywords: result.keywords }))} />
+      {(filters.keywords?.length ?? 0) > 0 && <p className="muted-note mp-basis-note">Showing only records mentioning: {filters.keywords!.slice(0, 8).join(', ')}. <button type="button" className="link-button" onClick={() => setFilter('keywords', [])}>Remove word filter</button></p>}
       {/* ---------------- filter bar */}
       <div className="mp-filters" role="group" aria-label="Map filters">
         <label>Time range

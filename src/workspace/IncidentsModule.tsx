@@ -1,3 +1,4 @@
+import { AiExplain, DraftBulletinButton, IncidentRelatedReports } from './AiPanels.tsx';
 import { useEffect, useMemo, useState } from 'react';
 import { sortedCountries } from '../data/countries.ts';
 import { SEVERITIES, type Severity } from '../data/feedTypes.ts';
@@ -309,6 +310,12 @@ function IncidentDetailView({ id, onBack, onNavigate }: { id: string; onBack: ()
       </div>
       {error && <Notice kind="error">{error}</Notice>}
       {detail.error && <Notice kind="stale">Could not refresh: {detail.error}. Showing the last loaded version from {fmt(detail.lastLoadedAt)}.</Notice>}
+
+      <AiExplain key={incident.id} title="AI incident assistant" path={`/incidents/${incident.id}/assist`} label="Assess with AI" onNavigate={onNavigate} needsPrivate
+        hint="Suggests what changed, what conflicts and what may be worth updating, from this incident and the reports linked to it. It never changes the incident, its severity or your conclusions. Exposure is shown as potential only.">
+        <DraftBulletinButton source={{ type: 'incident', id: incident.id }} onNavigate={onNavigate} small />
+        <IncidentRelatedReports incidentId={incident.id} onNavigate={onNavigate} />
+      </AiExplain>
 
       <div className="incident-layout">
         <div className="panel">
