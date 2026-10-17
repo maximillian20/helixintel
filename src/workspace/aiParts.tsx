@@ -8,8 +8,7 @@ export function AiStatusBanner({ status, error, compact }: { status: AiStatusDto
   if (error && !status) return <Notice kind="error">Could not read the AI status: {error}</Notice>;
   if (!status) return <Notice>Checking the AI connection…</Notice>;
   if (status.state === 'ready' && status.userEnabled) {
-    if (compact) return null;
-    return <Notice>AI ready: {status.model}{status.modelDigest ? ` (${status.modelDigest})` : ''} on {status.endpoint ?? 'this server'}{status.provider === 'cloudflare' ? ' (free hosted service; prompts leave this server)' : ''}. Answers are drafted from your records and always list their sources. No paid AI service is used.{!status.privateRecords && ' Private incidents, assessments and saved places are not sent to this service, so the features that need them are off.'}</Notice>;
+    return null; // working normally: nothing to show
   }
   if (status.state === 'ready') return <Notice kind="stale">{status.message}</Notice>;
   return (
